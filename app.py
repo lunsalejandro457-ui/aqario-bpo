@@ -43,6 +43,31 @@ PACIENTES = ["Carlos Ramirez", "Maria Lopez", "Jorge Herrera", "Ana Martinez", "
 MEDICOS = ["Dr. Alejandro Reyes", "Dra. Valentina Ortiz", "Dr. Miguel Angel Paredes", "Dra. Camila Duarte"]
 
 EMAIL_CONFIG_PATH = os.path.join(DIR_ACTUAL, "email_config.json")
+PERFIL_LEGAL_PATH = os.path.join(DIR_ACTUAL, "config_perfil.json")
+
+
+def cargar_perfil_legal():
+    try:
+        if os.path.exists(PERFIL_LEGAL_PATH):
+            import json
+            with open(PERFIL_LEGAL_PATH, "r") as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return {
+        "ips_nombre": "",
+        "ips_nit": "",
+        "ips_representante": "",
+        "ips_direccion": "Medellin, Colombia",
+        "gestor_nombre": "GRUPO AXIS S.A.S.",
+        "gestor_nit": "902021366"
+    }
+
+
+def guardar_perfil_legal(perfil):
+    import json
+    with open(PERFIL_LEGAL_PATH, "w") as f:
+        json.dump(perfil, f, indent=2)
 
 
 def cargar_config_email():
@@ -236,16 +261,26 @@ class TituloPDF(FPDF):
     def header(self):
         if self.logo_path and os.path.exists(self.logo_path):
             try:
-                self.image(self.logo_path, x=10, y=8, w=20)
+                self.image(self.logo_path, x=10, y=8, w=33)
+                self.set_xy(48, 8)
             except Exception:
-                pass
+                self.set_xy(10, 8)
+                self.set_font("Helvetica", "B", 16)
+                self.set_text_color(10, 26, 63)
+                self.cell(0, 10, "aQario - Gestion de Cartera", ln=1, align="L")
+                self.ln(3)
+                self.set_draw_color(10, 26, 63)
+                self.set_line_width(0.8)
+                self.line(10, self.get_y(), self.w - 10, self.get_y())
+                self.ln(4)
+                return
+        else:
+            self.set_xy(10, 8)
         
-        self.set_xy(35, 8)
         self.set_font("Helvetica", "B", 16)
         self.set_text_color(10, 26, 63)
-        self.cell(0, 8, "NOTIFICACION FORMAL DE TITULO EJECUTIVO", ln=1, align="L")
+        self.cell(0, 10, "NOTIFICACION FORMAL DE TITULO EJECUTIVO", ln=1, align="L")
         
-        self.set_xy(35, 18)
         self.set_font("Helvetica", "I", 8)
         self.set_text_color(100, 100, 100)
         self.cell(0, 5, "aQario - Grupo AXIS S.A.S. | NIT 902021366 | Medellin, Colombia", ln=1, align="L")
@@ -271,6 +306,8 @@ class TituloPDF(FPDF):
 def generar_titulo_pdf(datos_factura, eps, ips, usuario):
     try:
         logo_path = os.path.join(DIR_ACTUAL, "logo_aqario.png")
+        perfil = cargar_perfil_legal()
+        
         pdf = TituloPDF(format="Letter", orientation="P", unit="mm")
         pdf.usuario_impresion = usuario
         pdf.fecha_impresion = datetime.now().strftime("%d/%m/%Y %H:%M")
@@ -284,10 +321,11 @@ def generar_titulo_pdf(datos_factura, eps, ips, usuario):
         pdf.cell(0, 5, f"Medellin, Colombia - {ahora}", ln=1, align="R")
         pdf.ln(3)
 
-        eps_nombre = resolver_nombre_eps(eps)
+        ips_nombre = perfil.get("ips_nombre") or ips or resolver_nombre_eps(eps)
+        ips_nit = perfil.get("ips_nit") or eps
         pdf.set_font("Helvetica", "", 9)
         pdf.set_text_color(0, 0, 0)
-        pdf.multi_cell(0, 5, f"Señores: {eps_nombre} (NIT {eps})\nReferencia: Notificacion formal de cobro prejudicial por servicios de salud.\nLugar de emision: Medellin, Colombia.")
+        pdf.multi_cell(0, 5, f"Señores: {ips_nombre} (NIT {ips_nit})\nReferencia: Notificacion formal de cobro prejudicial.\nDireccion: {perfil.get('ips_direccion', 'Medellin, Colombia')}")
         pdf.ln(5)
 
         pdf.set_font("Helvetica", "B", 10)
@@ -374,6 +412,31 @@ def generar_titulo_pdf(datos_factura, eps, ips, usuario):
         pdf.set_font("Helvetica", "B", 14)
         pdf.set_text_color(10, 26, 63)
         pdf.cell(120, 12, valor_str, border=1, fill=True, align="C", ln=1)
+
+        pdf.ln(8)
+        pdf.set_font("Helvetica", "B", 9)
+        pdf.set_text_color(10, 26, 63)
+        pdf.cell(0, 6, "REQUERIMIENTO DE PAGO PRE-JURIDICO", ln=1)
+        pdf.ln(2)
+        pdf.set_font("Helvetica", "", 9)
+        pdf.set_text_color(0, 0, 0)
+        pdf.multi_cell(0, 5, f"En nuestra calidad de representantes de {ips_nombre}, le notificamos que lasfacturas detalladas presentan un estado de mora que afecta la liquidez de nuestro representado. {perfil.get('gestor_nombre','GRUPO AXIS S.A.S.')} ha sido facultado para el recaudo administrativo y judicial. Le instamos a realizar el pago en un plazo no mayor a 48 horas. De lo contrario, procederemos con la radicacion del titulo para un Proceso Ejecutivo, generando honorarios y costas procesales.")
+        
+        pdf.ln(3)
+        pdf.set_font("Helvetica", "B", 9)
+        pdf.set_text_color(10, 26, 63)
+        pdf.multi_cell(0, 5, f"Entidad Gestora: {perfil.get('gestor_nombre','GRUPO AXIS S.A.S.')} | NIT: {perfil.get('gestor_nit','902021366')}")
+        pdf.set_font("Helvetica", "", 8)
+        pdf.set_text_color(0, 0, 0)
+        pdf.multi_cell(0, 5, "Cordialmente,\nDepartamento de Recaudo y Cartera\nMedellin, Colombia")
+
+        pdf_output = pdf.output(dest="S")
+        if isinstance(pdf_output, (bytes, bytearray)):
+            return bytes(pdf_output)
+        return pdf_output.encode("latin-1") if isinstance(pdf_output, str) else pdf_output
+    except Exception as e:
+        st.error(f"Error al generar el PDF: {str(e)}")
+        return None
 
         pdf.ln(8)
         pdf.set_font("Helvetica", "", 9)
@@ -658,8 +721,8 @@ if "df_riesgo" not in st.session_state:
     st.session_state.df_riesgo = None
 if "pagina_actual" not in st.session_state:
     st.session_state.pagina_actual = 1
-if "fecha_auditoria_inicio" not in st.session_state:
-    st.session_state.fecha_auditoria_inicio = None
+if "perfil_legal" not in st.session_state:
+    st.session_state.perfil_legal = cargar_perfil_legal()
 if "db_cargada" not in st.session_state:
     st.session_state.db_cargada = cargar_db()
 if "df_auditoria_cargado" not in st.session_state:
@@ -1017,7 +1080,38 @@ def render_gestion_usuarios():
 
 
 def render_configuracion_tab():
-    st.markdown('<p class="section-title" style="margin-top: 0.5rem;">Base de Datos de Recuperacion</p>', unsafe_allow_html=True)
+    st.markdown('<p class="section-title" style="margin-top: 0.5rem;">Perfil Legal de Entidades</p>', unsafe_allow_html=True)
+    perfil = st.session_state.perfil_legal
+    
+    with st.container():
+        st.markdown('<div class="upload-container">', unsafe_allow_html=True)
+        col_p1, col_p2 = st.columns(2)
+        with col_p1:
+            st.markdown("**Entidad Acreedora (IPS)**")
+            ips_nombre = st.text_input("Nombre de la IPS", value=perfil.get("ips_nombre", ""), placeholder="IPS Beneficiaria", key="perfil_ips_nombre")
+            ips_nit = st.text_input("NIT", value=perfil.get("ips_nit", ""), placeholder="900000000", key="perfil_ips_nit")
+            ips_rep = st.text_input("Representante Legal", value=perfil.get("ips_representante", ""), placeholder="Nombre del representante", key="perfil_ips_rep")
+        with col_p2:
+            st.markdown("**Entidad Gestora**")
+            st.text_input("Gestor", value=perfil.get("gestor_nombre", "GRUPO AXIS S.A.S."), disabled=True, key="perfil_gestor")
+            st.text_input("NIT Gestor", value=perfil.get("gestor_nit", "902021366"), disabled=True, key="perfil_gestor_nit")
+            ips_dir = st.text_input("Direccion", value=perfil.get("ips_direccion", "Medellin, Colombia"), key="perfil_ips_dir")
+        
+        if st.button("Guardar Perfil Legal", use_container_width=True, type="primary"):
+            nuevo_perfil = {
+                "ips_nombre": ips_nombre,
+                "ips_nit": ips_nit,
+                "ips_representante": ips_rep,
+                "ips_direccion": ips_dir,
+                "gestor_nombre": "GRUPO AXIS S.A.S.",
+                "gestor_nit": "902021366"
+            }
+            guardar_perfil_legal(nuevo_perfil)
+            st.session_state.perfil_legal = nuevo_perfil
+            st.success("Perfil legal guardado y anclado.")
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    st.markdown('<p class="section-title">Base de Datos de Recuperacion</p>', unsafe_allow_html=True)
     df_db = st.session_state.db_cargada
     if not df_db.empty and "ips" in df_db.columns:
         ips_filter = ["Todas"] + df_db["ips"].unique().tolist()
