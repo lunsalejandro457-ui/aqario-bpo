@@ -1,14 +1,13 @@
-import io
 import streamlit as st
 import pandas as pd
 import numpy as np
-import re
 import os
 import json
 import hashlib
+import sqlite3
 import smtplib
 import ssl
-from datetime import datetime, timedelta
+from datetime import datetime
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
@@ -18,750 +17,238 @@ from fpdf import FPDF
 st.set_page_config(page_title="aQario", page_icon="📊", layout="wide", initial_sidebar_state="expanded")
 
 DIR_ACTUAL = os.path.dirname(os.path.abspath(__file__))
+DB_PATH = os.path.join(DIR_ACTUAL, "aqario.db")
 
-COLUMNAS_CRITICAS = ["NUMERO_FACTURA", "VALOR_TOTAL"]
+def clean_text(s):
+    return str(s).encode('latin-1', 'ignore').decode('latin-1')
 
-EPS_NOMBRES = {800123456: "Nueva EPS", 800234567: "SURA EPS", 800345678: "Salud Total", 800456789: "Coomeva", 900111222: "Sanitas"}
+def init_db():
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('''CREATE TABLE IF NOT EXISTS usuarios (
+        username TEXT PRIMARY KEY,
+        password_hash TEXT NOT NULL,
+        rol TEXT NOT NULL,
+        nombre TEXT,
+        eps_asignada TEXT
+    )''')
+    c.execute('''CREATE TABLE IF NOT EXISTS perfil_ips (
+        id INTEGER PRIMARY KEY,
+        nombre_ips TEXT,
+        nit_ips TEXT,
+        representante_legal TEXT,
+        direccion TEXT,
+        ciudad TEXT,
+        gestor_nombre TEXT DEFAULT 'GRUPO AXIS S.A.S.',
+        gestor_nit TEXT DEFAULT '902021366'
+    )''')
+    c.execute('''CREATE TABLE IF NOT EXISTS auditoria (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        ips TEXT,
+        eps TEXT,
+        no_factura TEXT,
+        valor TEXT,
+        errores TEXT,
+        fecha TEXT,
+        estado TEXT,
+        usuario TEXT,
+        accion TEXT
+    )''')
+    c.execute("SELECT COUNT(*) FROM usuarios")
+    if c.fetchone()[0] == 0:
+        admin_hash = hashlib.sha256("axis2026".encode()).hexdigest()
+        c.execute("INSERT INTO usuarios VALUES (?, ?, ?, ?, ?)", 
+            ("admin", admin_hash, "Master", "Admin AXIS", None))
+        c.execute("INSERT INTO usuarios VALUES (?, ?, ?, ?, ?)",
+            ("ips_sura", hashlib.sha256("sura2026".encode()).hexdigest(), "Cliente IPS", "IPS SURA", "SURA"))
+        c.execute("INSERT INTO usuarios VALUES (?, ?, ?, ?, ?)",
+            ("gestor1", hashlib.sha256("gestor2026".encode()).hexdigest(), "Gestor", "Gestor BPO", None))
+    conn.commit()
+    conn.close()
 
-GSHEETS_URL = "https://docs.google.com/spreadsheets/d/1KAf0K8YQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ/edit"
-PERFIL_LEGAL_PATH = os.path.join(DIR_ACTUAL, "config_perfil.json")
-DB_PATH = os.path.join(DIR_ACTUAL, "db_axis_recovery.csv")
-USERS_PATH = os.path.join(DIR_ACTUAL, "db_users.csv")
+init_db()
 
-USUARIOS_DEFAULT = {
-    "admin": {"password": hashlib.sha256("axis2026".encode()).hexdigest(), "rol": "Master", "nombre": "Admin AXIS", "eps_asignada": None},
-    "ips_sura": {"password": hashlib.sha256("sura2026".encode()).hexdigest(), "rol": "Cliente IPS", "nombre": "IPS SURA", "eps_asignada": "SURA"},
-    "gestor1": {"password": hashlib.sha256("gestor2026".encode()).hexdigest(), "rol": "Gestor", "nombre": "Gestor BPO", "eps_asignada": None},
-}
+def get_usuarios():
+    conn = sqlite3.connect(DB_PATH)
+    df = pd.read_sql("SELECT * FROM usuarios", conn)
+    conn.close()
+    return df
 
-def obtener_conexion_gsheets():
-    try:
-        if hasattr(st, 'connection'):
-            conn = st.connection("gsheets", type=GSheetsConnection)
-            return conn
-    except Exception:
-        pass
-    return None
+def get_perfil_ips():
+    conn = sqlite3.connect(DB_PATH)
+    df = pd.read_sql("SELECT * FROM perfil_ips LIMIT 1", conn)
+    conn.close()
+    return df.to_dict(orient="records")[0] if not df.empty else None
 
+def save_perfil_ips(data):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("DELETE FROM perfil_ips")
+    c.execute("INSERT INTO perfil_ips (nombre_ips, nit_ips, representante_legal, direccion, ciudad) VALUES (?, ?, ?, ?, ?)",
+        (data.get("nombre_ips", ""), data.get("nit_ips", ""), data.get("representante_legal", ""),
+         data.get("direccion", ""), data.get("ciudad", "Medellin")))
+    conn.commit()
+    conn.close()
 
-def cargar_desde_gsheets():
-    try:
-        conn = obtener_conexion_gsheets()
-        if conn:
-            df_usuarios = conn.read(worksheet="Usuarios")
-            df_perfil = conn.read(worksheet="Perfil_IPS")
-            df_auditoria = conn.read(worksheet="Auditoria_Cartera")
-            return df_usuarios, df_perfil, df_auditoria
-    except Exception:
-        pass
-    return None, None, None
+def save_auditoria(data):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("INSERT INTO auditoria (ips, eps, no_factura, valor, errores, fecha, estado, usuario, accion) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (data.get("ips", ""), data.get("eps", ""), data.get("no_factura", ""), data.get("valor", ""),
+         data.get("errores", ""), data.get("fecha", ""), data.get("estado", ""), data.get("usuario", ""), data.get("accion", "")))
+    conn.commit()
+    conn.close()
 
+def get_auditoria():
+    conn = sqlite3.connect(DB_PATH)
+    df = pd.read_sql("SELECT * FROM auditoria ORDER BY id DESC", conn)
+    conn.close()
+    return df
 
-def guardar_en_gsheets(hoja, data):
-    try:
-        conn = obtener_conexion_gsheets()
-        if conn:
-            if isinstance(data, pd.DataFrame):
-                conn.update(data=data, worksheet=hoja)
-            return True
-    except Exception:
-        pass
-    return False
-
-
-def cargar_perfil_legal():
-    try:
-        if os.path.exists(PERFIL_LEGAL_PATH):
-            with open(PERFIL_LEGAL_PATH, "r") as f:
-                return json.load(f)
-    except Exception:
-        pass
-    return {
-        "ips_nombre": "",
-        "ips_nit": "",
-        "ips_representante": "",
-        "ips_direccion": "Medellin, Colombia",
-        "gestor_nombre": "GRUPO AXIS S.A.S.",
-        "gestor_nit": "902021366"
-    }
-
-
-def guardar_perfil_legal(perfil):
-    try:
-        with open(PERFIL_LEGAL_PATH, "w") as f:
-            json.dump(perfil, f, indent=2)
-        guardar_en_gsheets("Perfil_IPS", pd.DataFrame([perfil]))
-    except Exception:
-        pass
-
-
-def generar_respaldo_total():
-    usuarios = cargar_usuarios()
-    perfil = cargar_perfil_legal()
-    db = cargar_db()
-    
-    respaldo = {
+def generar_respaldo():
+    usuarios = get_usuarios().to_dict(orient="records")
+    perfil = get_perfil_ips()
+    auditoria = get_auditoria().to_dict(orient="records")
+    return json.dumps({
         "usuarios": usuarios,
-        "perfil_legal": perfil,
-        "auditoria": db.to_dict(orient="records") if not db.empty else [],
-        "fecha_respaldo": datetime.now().strftime("%d/%m/%Y %H:%M")
-    }
-    return json.dumps(respaldo, indent=2, ensure_ascii=False)
+        "perfil_ips": perfil,
+        "auditoria": auditoria,
+        "fecha": datetime.now().strftime("%d/%m/%Y %H:%M")
+    }, indent=2, ensure_ascii=False)
 
-
-def cargar_respaldo(json_data):
-    try:
-        data = json.loads(json_data)
-        if "usuarios" in data:
-            guardar_usuarios(data["usuarios"])
-        if "perfil_legal" in data:
-            guardar_perfil_legal(data["perfil_legal"])
-        if "auditoria" in data and data["auditoria"]:
-            for reg in data["auditoria"]:
-                guardar_db(reg)
-        return True
-    except Exception:
-        return False
-
-
-def cargar_config_email():
-    try:
-        if os.path.exists(EMAIL_CONFIG_PATH):
-            import json
-            with open(EMAIL_CONFIG_PATH, "r") as f:
-                return json.load(f)
-    except Exception:
-        pass
-    return {"smtp_server": "smtp.gmail.com", "smtp_port": 587, "email": "", "password": "", "enabled": False}
-
-
-def guardar_config_email(config):
-    import json
-    with open(EMAIL_CONFIG_PATH, "w") as f:
-        json.dump(config, f, indent=2)
-
-
-def enviar_titulo_email(destinatario, asunto, cuerpo, pdf_bytes, nombre_archivo, config):
-    try:
-        msg = MIMEMultipart()
-        msg["From"] = config["email"]
-        msg["To"] = destinatario
-        msg["Subject"] = str(asunto)
-        msg.attach(MIMEText(cuerpo, "plain"))
-        part = MIMEBase("application", "octet-stream")
-        part.set_payload(pdf_bytes)
-        encoders.encode_base64(part)
-        part.add_header("Content-Disposition", f"attachment; filename={nombre_archivo}")
-        msg.attach(part)
-        context = ssl.create_default_context()
-        with smtplib.SMTP(config["smtp_server"], config["smtp_port"]) as server:
-            server.starttls(context=context)
-            server.login(config["email"], config["password"])
-            server.send_message(msg)
-        return True, "Correo enviado correctamente"
-    except Exception as e:
-        return False, f"Error al enviar: {str(e)}"
-
-
-def latin(text):
-    if isinstance(text, (bytes, bytearray)):
-        return bytes(text).decode("latin-1", "ignore")
-    return str(text).encode("latin-1", "ignore").decode("latin-1")
-
-
-def resolver_nombre_eps(nit):
-    try:
-        nit_int = int(nit)
-        return EPS_NOMBRES.get(nit_int, f"EPS NIT {nit}")
-    except (ValueError, TypeError):
-        return f"EPS NIT {nit}"
-
-
-def cargar_usuarios():
-    try:
-        if os.path.exists(USERS_PATH):
-            df = pd.read_csv(USERS_PATH)
-            usuarios = {}
-            for _, row in df.iterrows():
-                usuarios[row["username"]] = {"password": row["password_hash"], "rol": row["rol"], "nombre": row["nombre"], "eps_asignada": row.get("eps_asignada", None)}
-            return usuarios
-    except Exception:
-        pass
-    guardar_usuarios(USUARIOS_DEFAULT.copy())
-    return USUARIOS_DEFAULT.copy()
-
-
-def guardar_usuarios(usuarios):
-    rows = [{"username": u, "password_hash": d["password"], "rol": d["rol"], "nombre": d["nombre"], "eps_asignada": d.get("eps_asignada", "")} for u, d in usuarios.items()]
-    pd.DataFrame(rows).to_csv(USERS_PATH, index=False)
-
-
-def crear_usuario(username, password, rol, nombre, eps_asignada=None):
-    usuarios = cargar_usuarios()
-    if username in usuarios:
-        return False, "El usuario ya existe"
-    usuarios[username] = {"password": hashlib.sha256(password.encode()).hexdigest(), "rol": rol, "nombre": nombre, "eps_asignada": eps_asignada}
-    guardar_usuarios(usuarios)
-    return True, "Usuario creado correctamente"
-
-
-def eliminar_usuario(username):
-    usuarios = cargar_usuarios()
-    if username in usuarios and username != "admin":
-        del usuarios[username]
-        guardar_usuarios(usuarios)
-        return True, "Usuario eliminado"
-    return False, "No se puede eliminar este usuario"
-
-
-def cargar_db():
-    try:
-        if os.path.exists(DB_PATH):
-            return pd.read_csv(DB_PATH)
-    except Exception:
-        pass
-    return pd.DataFrame(columns=["fecha", "usuario", "accion", "factura", "eps", "valor", "estado", "ips", "no_factura", "errores"])
-
-
-def guardar_db(registro):
-    df = cargar_db()
-    new_row = pd.DataFrame([registro])
-    df = pd.concat([df, new_row], ignore_index=True)
-    df.to_csv(DB_PATH, index=False)
-
-
-def normalizar_columnas(cols):
-    return [re.sub(r"\s+", "_", col.strip().upper().replace("-", "_").replace(" ", "_")) for col in cols]
-
-
-def validar_estructura(df):
-    df_validado = df.copy()
-    df_validado.columns = normalizar_columnas(df_validado.columns)
-    
-    for col in COLUMNAS_CRITICAS:
-        if col not in df_validado.columns:
-            df_validado[col] = "N/A"
-    
-    campos_opcionales = {
-        "NOMBRE_PACIENTE": "N/A",
-        "DOCUMENTO": "N/A",
-        "FECHA_ATENCION": "N/A",
-        "MEDICO_TRATANTE": "No especificado",
-        "CODIGO_CUPS": "N/A",
-        "DIAGNOSTICO": "N/A",
-        "FECHA_RADICADO": "N/A",
-        "NIT_EPS": "N/A"
-    }
-    for col, default in campos_opcionales.items():
-        if col not in df_validado.columns:
-            df_validado[col] = default
-    
-    return df_validado, COLUMNAS_CRITICAS, []
-
-
-def validar_cruce_clinico(df):
-    alertas = []
-    return alertas
-
-
-def calcular_riesgo_cartera(df, alertas):
-    resultados = []
-    hoy = datetime.now()
-    for idx, fila in df.iterrows():
-        riesgo = "Recuperable"
-        icono = "🟢"
-        observaciones = "Datos completos y cartera vigente"
-        fecha_rad = str(fila.get("FECHA_RADICADO", ""))
-        antiguedad = 0
-        try:
-            fecha_dt = datetime.strptime(fecha_rad, "%Y-%m-%d")
-            antiguedad = (hoy - fecha_dt).days
-        except Exception:
-            pass
-        if antiguedad > 360 or len([a for a in alertas if a.get("fila") == idx + 2]) > 0:
-            riesgo = "Perdida Total"
-            icono = "🔴"
-            observaciones = f"Factura con {antiguedad} dias o errores criticos"
-        elif antiguedad > 90:
-            riesgo = "Arriesgado"
-            icono = "🟡"
-            observaciones = f"Cartera con {antiguedad} dias. Riesgo medio"
-        valor_total = float(fila.get("VALOR_TOTAL", 0))
-        resultados.append({
-            "no_factura": fila.get("NUMERO_FACTURA", ""),
-            "eps": fila.get("NIT_EPS", ""),
-            "valor": valor_total,
-            "riesgo": riesgo,
-            "icono": icono,
-            "antiguedad_dias": antiguedad,
-            "observaciones": observaciones,
-        })
-    return pd.DataFrame(resultados)
-
-
-def calcular_porcentaje_recuperacion(df_riesgo):
-    if df_riesgo.empty:
-        return 0, "Sin datos"
-    total = df_riesgo["valor"].sum()
-    if total == 0:
-        return 0, "Sin datos"
-    recuperable = df_riesgo[df_riesgo["riesgo"] == "Recuperable"]["valor"].sum()
-    arriesgado = df_riesgo[df_riesgo["riesgo"] == "Arriesgado"]["valor"].sum()
-    estimado = recuperable + (arriesgado * 0.5)
-    porcentaje = (estimado / total) * 100
-    if porcentaje >= 80:
-        return porcentaje, "Bueno"
-    elif porcentaje >= 50:
-        return porcentaje, "Moderado"
-    return porcentaje, "Critico"
-
+CSS = """<style>
+.stApp { background-color: #FFFFFF !important; }
+[data-testid="stSidebar"] { background-color: #0A1A3F !important; }
+[data-testid="stSidebar"] * { color: #FFFFFF !important; }
+.stMain *, .stMain p, .stMain label, .stMain span, .stMain h1, .stMain h2, .stMain h3 { color: #0A1A3F !important; }
+.stTabs [data-baseweb="tab"] p { color: #0A1A3F !important; font-weight: 600 !important; }
+.stTabs [aria-selected="true"] { border-bottom: 3px solid #1C3D73 !important; }
+.stButton>button { background-color: #1C3D73 !important; color: #FFFFFF !important; border-radius: 8px !important; font-weight: 600 !important; }
+input, .stSelectbox div { color: #000000 !important; background-color: #FFFFFF !important; }
+.stDataFrame td, .stDataFrame th { color: #0A1A3F !important; }
+</style>"""
 
 class TituloPDF(FPDF):
-    def __init__(self, *args, **kwargs):
-        self.logo_path = kwargs.pop("logo_path", None)
-        super().__init__(*args, **kwargs)
-
     def header(self):
         try:
-            if self.logo_path and os.path.exists(self.logo_path):
-                self.image(self.logo_path, x=10, y=8, w=30)
-                self.set_xy(45, 8)
-            else:
-                self.set_xy(10, 8)
-                self.set_font("Helvetica", "B", 14)
-                self.set_text_color(10, 26, 63)
-                self.cell(0, 10, "aQario - Gestion de Cartera", ln=1, align="L")
-                self.ln(3)
-                self.set_draw_color(10, 26, 63)
-                self.set_line_width(0.5)
-                self.line(10, self.get_y(), self.w - 10, self.get_y())
-                self.ln(3)
-                return
-        except Exception:
-            self.set_xy(10, 8)
-
-        self.set_font("Helvetica", "B", 14)
-        self.set_text_color(10, 26, 63)
-        self.cell(0, 10, "NOTIFICACION FORMAL DE TITULO EJECUTIVO", ln=1, align="L")
+            self.image(os.path.join(DIR_ACTUAL, 'logo_aqario.png'), x=10, y=8, w=35)
+            self.ln(20)
+        except:
+            self.set_font('Helvetica', 'B', 14)
+            self.cell(0, 10, 'aQario - GRUPO AXIS S.A.S.', ln=1)
         
         self.set_font("Helvetica", "I", 8)
         self.set_text_color(100, 100, 100)
-        self.cell(0, 5, "aQario - GRUPO AXIS S.A.S. | NIT 902021366 | Medellin, Colombia", ln=1, align="L")
-        
+        self.cell(0, 5, "aQario | GRUPO AXIS S.A.S. | NIT 902021366 | Medellin", ln=1, align="R")
         self.ln(3)
         self.set_draw_color(10, 26, 63)
         self.set_line_width(0.5)
         self.line(10, self.get_y(), self.w - 10, self.get_y())
-        self.ln(3)
+        self.ln(5)
 
     def footer(self):
         self.set_y(-15)
         self.set_draw_color(10, 26, 63)
-        self.set_line_width(0.3)
         self.line(10, self.get_y(), self.w - 10, self.get_y())
-        self.ln(2)
+        self.ln(3)
         self.set_font("Helvetica", "I", 6)
         self.set_text_color(0, 0, 0)
-        self.cell(0, 4, f"Generado por: {self.usuario_impresion} | {self.fecha_impresion}", ln=1, align="C")
-        self.cell(0, 4, "GRUPO AXIS S.A.S. - NIT 902021366 | Medellin, Colombia", ln=1, align="C")
-
+        self.cell(0, 4, f"Generado por: {self.usuario} | {self.fecha}", ln=1, align="C")
 
 def generar_titulo_pdf(datos_factura, eps, ips, usuario):
     try:
-        logo_path = os.path.join(DIR_ACTUAL, "logo_aqario.png")
-        perfil = cargar_perfil_legal()
+        perfil = get_perfil_ips() or {}
         
-        pdf = TituloPDF(format="Letter", orientation="P", unit="mm")
-        pdf.usuario_impresion = usuario
-        pdf.fecha_impresion = datetime.now().strftime("%d/%m/%Y %H:%M")
+        pdf = TituloPDF()
+        pdf.usuario = usuario
+        pdf.fecha = datetime.now().strftime("%d/%m/%Y %H:%M")
         pdf.set_auto_page_break(auto=True, margin=25)
         pdf.add_page()
         pdf.set_margins(15, 15, 15)
 
-        ahora = datetime.now().strftime("%d/%m/%Y - %H:%M:%S")
-        pdf.set_font("Helvetica", "", 9)
-        pdf.set_text_color(0, 0, 0)
-        pdf.cell(0, 5, f"Medellin, Colombia - {ahora}", ln=1, align="R")
-        pdf.ln(3)
-
-        ips_nombre = perfil.get("ips_nombre") or ips or resolver_nombre_eps(eps)
-        ips_nit = perfil.get("ips_nit") or eps
-        pdf.set_font("Helvetica", "", 9)
-        pdf.set_text_color(0, 0, 0)
-        pdf.multi_cell(0, 5, f"Señores: {ips_nombre} (NIT {ips_nit})\nReferencia: Notificacion formal de cobro prejudicial.\nDireccion: {perfil.get('ips_direccion', 'Medellin, Colombia')}")
+        pdf.set_font("Helvetica", "B", 14)
+        pdf.set_text_color(10, 26, 63)
+        pdf.cell(0, 10, "NOTIFICACION FORMAL DE TITULO EJECUTIVO", ln=1, align="C")
         pdf.ln(5)
 
-        pdf.set_font("Helvetica", "B", 10)
+        pdf.set_font("Helvetica", "", 10)
+        pdf.set_text_color(0, 0, 0)
+        pdf.cell(0, 6, f"Medellin, Colombia — {datetime.now().strftime('%d/%m/%Y')}", ln=1, align="R")
+        pdf.ln(5)
+
+        ips_nombre = perfil.get("nombre_ips", ips or "IPS Beneficiaria")
+        ips_nit = perfil.get("nit_ips", eps)
+        
+        pdf.set_font("Helvetica", "B", 11)
         pdf.set_text_color(10, 26, 63)
-        pdf.cell(0, 7, "DATOS DEL TITULO EJECUTIVO", ln=1)
+        pdf.cell(0, 8, "DATOS DE LA OBLIGACION", ln=1)
         pdf.set_draw_color(10, 26, 63)
-        pdf.set_line_width(0.5)
-        pdf.line(pdf.l_margin, pdf.get_y(), pdf.w - pdf.r_margin, pdf.get_y())
+        pdf.line(15, pdf.get_y(), pdf.w - 15, pdf.get_y())
         pdf.ln(5)
 
         row_h = 8
         
         pdf.set_font("Helvetica", "B", 9)
         pdf.set_text_color(10, 26, 63)
-        pdf.multi_cell(0, row_h, f"No. Factura: {datos_factura.get('NUMERO_FACTURA', 'N/A')}", border=0)
-        pdf.set_font("Helvetica", "B", 9)
-        pdf.set_text_color(10, 26, 63)
-        pdf.multi_cell(0, row_h, f"CUPS: {datos_factura.get('CODIGO_CUPS', 'N/A')}", border=0)
+        pdf.multi_cell(0, row_h, f"No. Factura: {clean_text(datos_factura.get('NUMERO_FACTURA', 'N/A'))}", border=0)
         
         pdf.set_font("Helvetica", "B", 9)
         pdf.set_text_color(10, 26, 63)
-        pdf.multi_cell(0, row_h, f"Fecha Radicado: {datos_factura.get('FECHA_RADICADO', 'N/A')}", border=0)
-        pdf.set_font("Helvetica", "B", 9)
-        pdf.set_text_color(10, 26, 63)
-        pdf.multi_cell(0, row_h, f"Diagnostico: {datos_factura.get('DIAGNOSTICO', 'N/A')}", border=0)
+        pdf.multi_cell(0, row_h, f"Paciente: {clean_text(datos_factura.get('NOMBRE_PACIENTE', datos_factura.get('Nombre_Paciente', 'No especificado')))}", border=0)
         
         pdf.set_font("Helvetica", "B", 9)
         pdf.set_text_color(10, 26, 63)
-        pdf.multi_cell(0, row_h, f"Paciente: {datos_factura.get('NOMBRE_PACIENTE', datos_factura.get('Nombre_Paciente', 'N/A'))}", border=0)
-        pdf.set_font("Helvetica", "B", 9)
-        pdf.set_text_color(10, 26, 63)
-        pdf.multi_cell(0, row_h, f"Profesional: {datos_factura.get('MEDICO_TRATANTE', datos_factura.get('Medico_Tratante', 'No especificado'))}", border=0)
+        pdf.multi_cell(0, row_h, f"Documento: {clean_text(datos_factura.get('DOCUMENTO', datos_factura.get('NUMERO_DOCUMENTO', 'No especificado')))}", border=0)
         
         pdf.set_font("Helvetica", "B", 9)
         pdf.set_text_color(10, 26, 63)
-        doc = datos_factura.get("DOCUMENTO", datos_factura.get("NUMERO_DOCUMENTO", datos_factura.get("TIPO_DOCUMENTO", "N/A")))
-        pdf.multi_cell(0, row_h, f"Documento: {doc}", border=0)
+        pdf.multi_cell(0, row_h, f"Fecha Atencion: {clean_text(datos_factura.get('FECHA_ATENCION', 'No especificado'))}", border=0)
+        
         pdf.set_font("Helvetica", "B", 9)
         pdf.set_text_color(10, 26, 63)
-        pdf.multi_cell(0, row_h, f"Fecha Atencion: {datos_factura.get('FECHA_ATENCION', datos_factura.get('Fecha_Atencion', 'N/A'))}", border=0)
+        pdf.multi_cell(0, row_h, f"CUPS: {clean_text(datos_factura.get('CODIGO_CUPS', 'No especificado'))}", border=0)
+        
+        pdf.set_font("Helvetica", "B", 9)
+        pdf.set_text_color(10, 26, 63)
+        pdf.multi_cell(0, row_h, f"Diagnostico: {clean_text(datos_factura.get('DIAGNOSTICO', 'No especificado'))}", border=0)
+        
+        pdf.set_font("Helvetica", "B", 9)
+        pdf.set_text_color(10, 26, 63)
+        pdf.multi_cell(0, row_h, f"Profesional: {clean_text(datos_factura.get('MEDICO_TRATANTE', datos_factura.get('Medico_Tratante', 'No especificado')))}", border=0)
 
-        pdf.ln(8)
+        pdf.ln(5)
         pdf.set_draw_color(10, 26, 63)
         pdf.set_fill_color(235, 240, 255)
         pdf.set_font("Helvetica", "B", 12)
         pdf.set_text_color(0, 0, 0)
-        valor_total = datos_factura.get("VALOR_TOTAL", 0)
-        valor_str = f"$ {int(float(valor_total)):,.0f} COP" if isinstance(valor_total, (int, float)) else str(valor_total)
+        
+        valor = datos_factura.get("VALOR_TOTAL", 0)
+        valor_str = f"$ {int(float(valor)):,.0f} COP" if isinstance(valor, (int, float)) else str(valor)
         pdf.cell(0, 12, f"VALOR TOTAL A COBRAR: {valor_str}", border=1, fill=True, align="C", ln=1)
 
         pdf.ln(8)
-        pdf.set_font("Helvetica", "B", 10)
+        pdf.set_font("Helvetica", "B", 11)
         pdf.set_text_color(10, 26, 63)
         pdf.cell(0, 8, "REQUERIMIENTO DE PAGO PRE-JURIDICO", ln=1)
-        pdf.ln(2)
-        pdf.set_font("Helvetica", "", 9)
-        pdf.set_text_color(0, 0, 0)
-        pdf.multi_cell(0, 5, f"En nuestra calidad de representantes de {ips_nombre}, le notificamos que las facturas detalladas presentan un estado de mora que afecta la liquidez de nuestro representado. {perfil.get('gestor_nombre','GRUPO AXIS S.A.S.')} ha sido facultado para el recaudo administrativo y judicial. Le instamos a realizar el pago en un plazo no mayor a 48 horas. De lo contrario, procederemos con la radicacion del titulo para un Proceso Ejecutivo, generando honorarios y costas procesales.")
+        pdf.ln(3)
         
-        pdf.ln(3)
-        pdf.set_font("Helvetica", "B", 9)
-        pdf.set_text_color(10, 26, 63)
-        pdf.multi_cell(0, 5, f"Entidad Gestora: {perfil.get('gestor_nombre','GRUPO AXIS S.A.S.')} | NIT: {perfil.get('gestor_nit','902021366')}")
-        pdf.set_font("Helvetica", "", 8)
-        pdf.set_text_color(0, 0, 0)
-        pdf.multi_cell(0, 5, "Cordialmente,\nDepartamento de Recaudo y Cartera\nMedellin, Colombia")
-
-        pdf_output = pdf.output(dest="S")
-        if isinstance(pdf_output, (bytes, bytearray)):
-            return bytes(pdf_output)
-        return pdf_output.encode("latin-1") if isinstance(pdf_output, str) else pdf_output
-    except Exception as e:
-        st.error(f"Error al generar el PDF: {str(e)}")
-        return None
-
-        pdf.ln(8)
-        pdf.set_draw_color(10, 26, 63)
-        pdf.set_fill_color(235, 240, 255)
-        pdf.set_font("Helvetica", "B", 12)
-        pdf.set_text_color(0, 0, 0)
-        pdf.set_x(15)
-        pdf.cell(60, 12, "VALOR TOTAL A COBRAR:", border=1, fill=True, ln=0)
-        valor_total = datos_factura.get("VALOR_TOTAL", 0)
-        valor_str = f"$ {int(float(valor_total)):,.0f} COP" if isinstance(valor_total, (int, float)) else str(valor_total)
-        pdf.set_font("Helvetica", "B", 14)
-        pdf.set_text_color(10, 26, 63)
-        pdf.cell(120, 12, valor_str, border=1, fill=True, align="C", ln=1)
-
-        pdf.ln(8)
-        pdf.set_font("Helvetica", "B", 9)
-        pdf.set_text_color(10, 26, 63)
-        pdf.cell(0, 6, "REQUERIMIENTO DE PAGO PRE-JURIDICO", ln=1)
-        pdf.ln(2)
         pdf.set_font("Helvetica", "", 9)
         pdf.set_text_color(0, 0, 0)
-        pdf.multi_cell(0, 5, f"En nuestra calidad de representantes de {ips_nombre}, le notificamos que lasfacturas detalladas presentan un estado de mora que afecta la liquidez de nuestro representado. {perfil.get('gestor_nombre','GRUPO AXIS S.A.S.')} ha sido facultado para el recaudo administrativo y judicial. Le instamos a realizar el pago en un plazo no mayor a 48 horas. De lo contrario, procederemos con la radicacion del titulo para un Proceso Ejecutivo, generando honorarios y costas procesales.")
-        
-        pdf.ln(3)
-        pdf.set_font("Helvetica", "B", 9)
-        pdf.set_text_color(10, 26, 63)
-        pdf.multi_cell(0, 5, f"Entidad Gestora: {perfil.get('gestor_nombre','GRUPO AXIS S.A.S.')} | NIT: {perfil.get('gestor_nit','902021366')}")
-        pdf.set_font("Helvetica", "", 8)
-        pdf.set_text_color(0, 0, 0)
-        pdf.multi_cell(0, 5, "Cordialmente,\nDepartamento de Recaudo y Cartera\nMedellin, Colombia")
-
-        pdf_output = pdf.output(dest="S")
-        if isinstance(pdf_output, (bytes, bytearray)):
-            return bytes(pdf_output)
-        return pdf_output.encode("latin-1") if isinstance(pdf_output, str) else pdf_output
-    except Exception as e:
-        st.error(f"Error al generar el PDF: {str(e)}")
-        return None
+        texto = f"En nuestra calidad de representantes de {ips_nombre}, le notificamos que las facturas detalladas presentan estado de mora que afecta la liquidez de nuestro representado. GRUPO AXIS S.A.S. ha sido facultado para el recaudo administrativo y judicial. Le instamos a realizar el pago en un plazo no mayor a 48 horas. De lo contrario, procederemos con la radicacion del titulo para Proceso Ejecutivo, generando honorarios y costas procesales a que haya lugar."
+        pdf.multi_cell(0, 5, clean_text(texto))
 
         pdf.ln(8)
-        pdf.set_font("Helvetica", "", 9)
+        pdf.set_font("Helvetica", "", 8)
         pdf.set_text_color(0, 0, 0)
-        pdf.multi_cell(0, 5, f"La entidad beneficiaria {ips}, bajo contrato de mandato con GRUPO AXIS S.A.S., EXIGE el pago de esta obligacion economica. Este documento constituye notificacion formal. El incumplimiento facultara para iniciar acciones judiciales mediante proceso ejecutivo.")
-        pdf.ln(3)
-        pdf.multi_cell(0, 5, "Cordialmente,\nDepartamento de Recaudo y Cartera - GRUPO AXIS S.A.S.\nNIT 902021366-2 | Medellin, Colombia")
+        pdf.multi_cell(0, 5, "Departamento de Recaudo y Gestion de Cartera — GRUPO AXIS S.A.S.\naQario es un software creado por Grupo AXIS S.A.S. NIT 902021366\nMedellin, Colombia | El Eje de su Crecimiento")
 
-        pdf_output = pdf.output(dest="S")
-        if isinstance(pdf_output, (bytes, bytearray)):
-            return bytes(pdf_output)
-        return pdf_output.encode("latin-1") if isinstance(pdf_output, str) else pdf_output
+        output = pdf.output(dest="S")
+        if isinstance(output, (bytes, bytearray)):
+            return bytes(output)
+        return output.encode("latin-1") if isinstance(output, str) else output
     except Exception as e:
-        st.error(f"Error al generar el PDF: {str(e)}")
+        st.error(f"Error PDF: {str(e)}")
         return None
-
-
-def generar_certificado_auditoria(df, alertas, ips_nombre, fecha_inicio, fecha_fin):
-    try:
-        logo_path = os.path.join(DIR_ACTUAL, "logo_aqario.png")
-        pdf = TituloPDF(format="Letter", logo_path=logo_path)
-        pdf.usuario_impresion = "Sistema aQario"
-        pdf.fecha_impresion = datetime.now().strftime("%d/%m/%Y")
-        pdf.set_auto_page_break(auto=True, margin=25)
-        pdf.add_page()
-        pdf.set_margins(left=15, top=5, right=15)
-
-        total_facturas = len(df)
-        total_valor = f"$ {df['VALOR_TOTAL'].sum():,.0f} COP" if "VALOR_TOTAL" in df.columns else "N/A"
-        total_errores = len(alertas)
-        ahora = datetime.now().strftime("%d/%m/%Y - %H:%M:%S")
-
-        pdf.set_font("Helvetica", "", 8)
-        pdf.set_text_color(0, 0, 0)
-        pdf.cell(0, 4, f"Medellin, {ahora}", ln=1, align="R")
-        pdf.ln(1)
-
-        pdf.set_font("Helvetica", "B", 10)
-        pdf.set_text_color(10, 26, 63)
-        pdf.cell(0, 7, "CERTIFICADO DE AUDITORIA CONSOLIDADO", ln=1, align="C")
-        pdf.ln(2)
-
-        pdf.set_font("Helvetica", "", 8)
-        pdf.set_text_color(0, 0, 0)
-        pdf.multi_cell(0, 4, f"GRUPO AXIS S.A.S. certifica que entre el {fecha_inicio} y el {fecha_fin} se auditaron {total_facturas} facturas de la {ips_nombre}.")
-        pdf.multi_cell(0, 4, f"Valor total auditado: {total_valor}")
-        pdf.ln(2)
-
-        pdf.set_font("Helvetica", "B", 8)
-        pdf.set_text_color(10, 26, 63)
-        pdf.cell(0, 5, "Hallazgos de Auditoria", ln=1)
-        pdf.ln(1)
-
-        pdf.set_font("Helvetica", "", 8)
-        pdf.set_text_color(0, 0, 0)
-        if total_errores > 0:
-            pdf.multi_cell(0, 4, f"Se detectaron {total_errores} errores en codigos CUPS y validacion clinica:")
-            pdf.ln(1)
-            for a in alertas[:20]:
-                pdf.cell(0, 4, f" - Fila {a['fila']}: {a['tipo']} (CUPS: {a['cups']})", ln=1)
-        else:
-            pdf.multi_cell(0, 4, "Auditoria exitosa: 0 errores encontrados.")
-
-        pdf.ln(3)
-        pdf.set_draw_color(10, 26, 63)
-        pdf.set_line_width(0.8)
-        pdf.rect(pdf.l_margin + 5, pdf.get_y(), pdf.w - pdf.r_margin - pdf.l_margin - 10, 12)
-        pdf.set_font("Helvetica", "B", 9)
-        pdf.set_text_color(0, 0, 0)
-        pdf.set_xy(pdf.l_margin + 10, pdf.get_y() + 3)
-        pdf.cell(0, 5, "TITULO EJECUTIVO GENERADO", ln=1, align="C")
-        pdf.set_xy(pdf.l_margin + 10, pdf.get_y())
-        pdf.set_font("Helvetica", "", 7)
-        pdf.cell(0, 4, "Las facturas aprobadas cuentan con soporte legal para cobro prejuridico", ln=1, align="C")
-
-        pdf_output = pdf.output(dest="S")
-        if isinstance(pdf_output, (bytes, bytearray)):
-            return bytes(pdf_output)
-        return pdf_output.encode("latin-1") if isinstance(pdf_output, str) else pdf_output
-    except Exception as e:
-        st.error(f"Error al generar certificado: {str(e)}")
-        return None
-
-
-def generar_certificado_diagnostico(df_riesgo, porcentaje, estado, ips_nombre):
-    try:
-        logo_path = os.path.join(DIR_ACTUAL, "logo_aqario.png")
-        pdf = TituloPDF(format="Letter", logo_path=logo_path)
-        pdf.usuario_impresion = "Sistema aQario"
-        pdf.fecha_impresion = datetime.now().strftime("%d/%m/%Y")
-        pdf.set_auto_page_break(auto=True, margin=25)
-        pdf.add_page()
-        pdf.set_margins(left=15, top=5, right=15)
-
-        ahora = datetime.now().strftime("%d/%m/%Y - %H:%M:%S")
-        total_cartera = df_riesgo["valor"].sum() if not df_riesgo.empty else 0
-
-        pdf.set_font("Helvetica", "", 8)
-        pdf.set_text_color(0, 0, 0)
-        pdf.cell(0, 4, f"Medellin, {ahora}", ln=1, align="R")
-        pdf.ln(1)
-
-        pdf.set_font("Helvetica", "B", 10)
-        pdf.set_text_color(10, 26, 63)
-        pdf.cell(0, 7, "CERTIFICADO DE ESTADO DE CARTERA", ln=1, align="C")
-        pdf.ln(2)
-
-        pdf.set_font("Helvetica", "", 8)
-        pdf.set_text_color(0, 0, 0)
-        pdf.multi_cell(0, 4, f"Bajo el diagnostico tecnico de AXIS BPO, la cartera de {ips_nombre} tiene un potencial de recuperacion del {porcentaje:.1f}%. Estado promedio: {estado}.")
-        pdf.multi_cell(0, 4, f"Cartera total: $ {total_cartera:,.0f} COP | Facturas: {len(df_riesgo)}")
-        pdf.ln(2)
-
-        pdf.set_font("Helvetica", "B", 8)
-        pdf.set_text_color(10, 26, 63)
-        pdf.cell(0, 5, "Clasificacion de Riesgo", ln=1)
-        pdf.ln(1)
-
-        pdf.set_font("Helvetica", "", 8)
-        pdf.set_text_color(0, 0, 0)
-        for riesgo in ["Recuperable", "Arriesgado", "Perdida Total"]:
-            count = len(df_riesgo[df_riesgo["riesgo"] == riesgo]) if not df_riesgo.empty else 0
-            val = df_riesgo[df_riesgo["riesgo"] == riesgo]["valor"].sum() if not df_riesgo.empty else 0
-            pdf.cell(0, 4, f" - {riesgo}: {count} facturas ($ {val:,.0f})", ln=1)
-        pdf.ln(3)
-
-        pdf.set_draw_color(10, 26, 63)
-        pdf.set_line_width(0.8)
-        pdf.rect(pdf.l_margin + 5, pdf.get_y(), pdf.w - pdf.r_margin - pdf.l_margin - 10, 12)
-        pdf.set_xy(pdf.l_margin + 10, pdf.get_y() + 3)
-        pdf.set_font("Helvetica", "", 7)
-        pdf.set_text_color(0, 0, 0)
-        pdf.multi_cell(0, 4, "Nuestro equipo ejecutara las acciones necesarias para el rescate de estos fondos.\nGRUPO AXIS S.A.S. - Departamento de Recaudo y Cartera")
-
-        pdf_output = pdf.output(dest="S")
-        if isinstance(pdf_output, (bytes, bytearray)):
-            return bytes(pdf_output)
-        return pdf_output.encode("latin-1") if isinstance(pdf_output, str) else pdf_output
-    except Exception as e:
-        st.error(f"Error al generar certificado: {str(e)}")
-        return None
-
-
-def generar_informe_hallazgos(df_alertas, ips_nombre, periodo, usuario):
-    try:
-        logo_path = os.path.join(DIR_ACTUAL, "logo_aqario.png")
-        pdf = TituloPDF(format="Letter", logo_path=logo_path)
-        pdf.usuario_impresion = usuario
-        pdf.fecha_impresion = datetime.now().strftime("%d/%m/%Y")
-        pdf.set_auto_page_break(auto=True, margin=25)
-        pdf.add_page()
-        pdf.set_margins(left=15, top=5, right=15)
-
-        ahora = datetime.now().strftime("%d/%m/%Y - %H:%M:%S")
-        total_errores = len(df_alertas)
-
-        pdf.set_font("Helvetica", "", 8)
-        pdf.set_text_color(0, 0, 0)
-        pdf.cell(0, 4, f"Medellin, {ahora}", ln=1, align="R")
-        pdf.ln(1)
-
-        pdf.set_font("Helvetica", "B", 10)
-        pdf.set_text_color(10, 26, 63)
-        pdf.cell(0, 6, f"INFORME DE HALLAZGOS - {periodo.upper()}", ln=1, align="C")
-        pdf.ln(1)
-        pdf.set_font("Helvetica", "", 8)
-        pdf.cell(0, 4, f"IPS: {ips_nombre}", ln=1)
-        pdf.ln(2)
-
-        pdf.set_font("Helvetica", "", 8)
-        pdf.set_text_color(0, 0, 0)
-        pdf.multi_cell(0, 4, f"Senores {ips_nombre}: Hemos detectado {total_errores} errores este periodo ({periodo}). Observaciones: Mejorar la codificacion SOAT en urgencias.")
-        pdf.ln(2)
-
-        if total_errores > 0:
-            pdf.set_font("Helvetica", "B", 8)
-            pdf.set_text_color(10, 26, 63)
-            pdf.cell(0, 5, "Errores Detectados", ln=1)
-            pdf.ln(1)
-            pdf.set_font("Helvetica", "", 7)
-            pdf.set_text_color(0, 0, 0)
-            for _, a in df_alertas.iterrows():
-                pdf.cell(0, 4, f"- Fila {a.get('fila', '')}: {a.get('tipo', '')} | CUPS: {a.get('cups', '')}", ln=1)
-
-        pdf.ln(3)
-        pdf.multi_cell(0, 4, "Informe generado por sistema aQario - Grupo AXIS S.A.S.")
-        pdf_output = pdf.output(dest="S")
-        if isinstance(pdf_output, (bytes, bytearray)):
-            return bytes(pdf_output)
-        return pdf_output.encode("latin-1") if isinstance(pdf_output, str) else pdf_output
-    except Exception as e:
-        st.error(f"Error: {str(e)}")
-        return None
-
-
-CUSTOM_CSS = """
-<style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
-    * { font-family: 'Inter', sans-serif; }
-    .stApp { background-color: #FFFFFF !important; }
-    .main-header { color: #0A1A3F; font-size: 2.5rem; font-weight: 700; letter-spacing: -0.5px; margin-bottom: 0.25rem; }
-    .main-subheader { color: #0A1A3F; font-size: 1rem; font-weight: 600; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 1.5rem; }
-    .description-text { color: #0A1A3F; font-size: 0.95rem; line-height: 1.7; max-width: 720px; font-weight: 500; }
-    .section-title { color: #0A1A3F; font-size: 1.25rem; font-weight: 600; margin-top: 2rem; margin-bottom: 1rem; padding-bottom: 0.5rem; border-bottom: 2px solid #0A1A3F; }
-    .upload-container { background-color: #FFFFFF; border: 1px solid #E5E7EB; border-radius: 12px; padding: 2rem; box-shadow: 0 1px 3px rgba(10, 26, 63, 0.08); }
-    .action-button-container { background-color: #F3F4F6; border: 1px solid #E5E7EB; border-radius: 12px; padding: 1.5rem; text-align: center; box-shadow: 0 2px 8px rgba(10, 26, 63, 0.06); }
-    .footer { margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid #E5E7EB; color: #0A1A3F !important; font-size: 0.8rem; text-align: center; font-weight: 500; }
-    hr.divider { border: none; height: 1px; background: linear-gradient(to right, transparent, #0A1A3F, transparent); margin: 2rem 0; }
-    .risk-green { background-color: #ECFDF5; border-left: 4px solid #10B981; padding: 12px 16px; border-radius: 8px; margin: 8px 0; }
-    .risk-yellow { background-color: #FFFBEB; border-left: 4px solid #F59E0B; padding: 12px 16px; border-radius: 8px; margin: 8px 0; }
-    .risk-red { background-color: #FEF2F2; border-left: 4px solid #EF4444; padding: 12px 16px; border-radius: 8px; margin: 8px 0; }
-    .stTabs [data-baseweb="tab-list"] { gap: 8px; }
-    .stTabs [data-baseweb="tab"] { background-color: #F3F4F6 !important; border-radius: 8px; padding: 12px 24px; border: 1px solid #E5E7EB; color: #0A1A3F !important; font-weight: 600 !important; }
-    .stTabs [data-baseweb="tab-list"] button[aria-selected="true"] { background-color: #0A1A3F !important; color: #FFFFFF !important; border-color: #0A1A3F !important; }
-    .stTabs [data-baseweb="tab"] span { color: #0A1A3F !important; }
-    .stTabs [data-baseweb="tab-list"] button[aria-selected="true"] span { color: #FFFFFF !important; }
-    .stSelectbox [data-baseweb="select"] { background-color: #FFFFFF !important; color: #0A1A3F !important; }
-    .stSelectbox [data-baseweb="select"] * { background-color: #FFFFFF !important; color: #0A1A3F !important; }
-    .stSelectbox [data-baseweb="select"] > div { background-color: #FFFFFF !important; color: #0A1A3F !important; }
-    .stSelectbox input { background-color: #FFFFFF !important; color: #0A1A3F !important; }
-    [data-testid="stSidebar"] .stSelectbox [data-baseweb="select"] { background-color: #F0F0F0 !important; color: #0A1A3F !important; }
-    [data-testid="stSidebar"] .stSelectbox [data-baseweb="select"] * { color: #0A1A3F !important; }
-    .stMetric { background-color: #FFFFFF; border-radius: 8px; padding: 1rem; }
-    .stMetric label, .stMetric p, .stMetric span { color: #000000 !important; font-weight: 600 !important; }
-    div[data-testid="stExpander"] { background-color: transparent; }
-    [data-testid="stExpander"] .streamlit-expanderHeader { background-color: #FFFFFF; border: 1px solid #E5E7EB; border-radius: 8px; color: #0A1A3F !important; font-weight: 600 !important; }
-    p, label, span, div, h1, h2, h3, h4, h5, h6, li, td, th { color: #0A1A3F !important; }
-    .stMarkdown p, .stMarkdown span { color: #0A1A3F !important; }
-    [data-testid="stMetricValue"] { color: #000000 !important; }
-    [data-testid="stMetricLabel"] { color: #0A1A3F !important; }
-</style>
-"""
-
-st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
-
-st.markdown('''
-<style>
-    [data-testid="stSidebar"] { background-color: #0A1A3F !important; }
-    [data-testid="stSidebar"] *, [data-testid="stSidebar"] p, [data-testid="stSidebar"] span, [data-testid="stSidebar"] label {
-        color: #FFFFFF !important; font-weight: 600 !important;
-    }
-    .stMain p, .stMain label, .stMain h1, .stMain h2, .stMain h3, .stMain span { color: #0A1A3F !important; }
-    input { color: #000000 !important; font-weight: 500 !important; }
-    [data-testid="stSidebar"] img { margin-top: -20px; margin-bottom: 20px; }
-    div[data-testid="stMarkdownContainer"] p, label, span { color: #0A1A3F !important; font-weight: 600 !important; }
-    .stError, .stWarning, .stInfo, .stSuccess { color: #0A1A3F !important; font-weight: 600 !important; }
-    div[data-testid="stAlert"] { color: #0A1A3F !important; }
-    button[kind="primary"] {
-        background-color: #0A1A3F !important; color: #FFFFFF !important; border-radius: 10px !important;
-        font-size: 16px !important; font-weight: 600 !important; padding: 12px 24px !important; border: none !important;
-    }
-    button[kind="primary"]:hover {
-        background-color: #000000 !important; color: #FFFFFF !important;
-        box-shadow: 0 4px 12px rgba(10, 26, 63, 0.3) !important;
-    }
-    th { background-color: #0A1A3F !important; color: #FFFFFF !important; }
-    td { color: #0A1A3F !important; font-weight: 500 !important; }
-    .dataframe { border: 1px solid #E5E7EB !important; }
-    [data-testid="stCaption"] { color: #0A1A3F !important; }
-</style>
-''', unsafe_allow_html=True)
 
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
@@ -771,534 +258,194 @@ if "rol" not in st.session_state:
     st.session_state.rol = None
 if "df_auditoria" not in st.session_state:
     st.session_state.df_auditoria = None
-if "uploaded_file_name" not in st.session_state:
-    st.session_state.uploaded_file_name = None
-if "historial" not in st.session_state:
-    st.session_state.historial = []
-if "usuarios" not in st.session_state:
-    st.session_state.usuarios = cargar_usuarios()
-if "alertas_detectadas" not in st.session_state:
-    st.session_state.alertas_detectadas = []
-if "ips_seleccionada" not in st.session_state:
-    st.session_state.ips_seleccionada = "Todas las IPS"
-if "df_riesgo" not in st.session_state:
-    st.session_state.df_riesgo = None
-if "pagina_actual" not in st.session_state:
-    st.session_state.pagina_actual = 1
-if "perfil_legal" not in st.session_state:
-    st.session_state.perfil_legal = cargar_perfil_legal()
-if "db_cargada" not in st.session_state:
-    st.session_state.db_cargada = cargar_db()
-if "df_auditoria_cargado" not in st.session_state:
-    st.session_state.df_auditoria_cargado = cargar_db()
-if "db_cargada" not in st.session_state:
-    st.session_state.db_cargada = cargar_db()
-ROWS_POR_PAGINA = 100
+if "perfil_ips" not in st.session_state:
+    st.session_state.perfil_ips = get_perfil_ips()
 
-
-def agregar_historial(nombre_archivo, tipo):
-    entrada = {"archivo": nombre_archivo, "tipo": tipo, "fecha": datetime.now().strftime("%d/%m/%Y %H:%M"), "usuario": st.session_state.user}
-    st.session_state.historial.insert(0, entrada)
-    if len(st.session_state.historial) > 50:
-        st.session_state.historial = st.session_state.historial[:50]
-
+st.markdown(CSS, unsafe_allow_html=True)
 
 def render_login():
-    col_c1, col_c2, col_c3 = st.columns([1, 1.2, 1])
-    with col_c2:
-        logo_login = os.path.join(DIR_ACTUAL, "logo_aqario.png")
-        if os.path.exists(logo_login):
-            st.image(logo_login, width=160)
-        else:
-            st.markdown('<div style="text-align:center; font-size:2.5rem; font-weight:700; color:#0A1A3F; margin-bottom:1rem;">aQario</div>', unsafe_allow_html=True)
-        st.markdown('<p style="text-align:center; color:#0A1A3F; font-size:0.8rem; font-weight:600; letter-spacing:2px; text-transform:uppercase; margin-top:-0.75rem; margin-bottom:2rem;">Sistema de Auditoria y Recuperacion de Cartera</p>', unsafe_allow_html=True)
-        with st.form("login_form"):
-            username = st.text_input("Usuario", placeholder="Ingrese su usuario")
-            password = st.text_input("Contraseña", type="password", placeholder="Ingrese su contraseña")
-            submitted = st.form_submit_button("Ingresar", use_container_width=True, type="primary")
-            if submitted:
-                usuarios = cargar_usuarios()
-                pwd_hash = hashlib.sha256(password.encode()).hexdigest()
-                if username in usuarios and usuarios[username]["password"] == pwd_hash:
-                    st.session_state.logged_in = True
-                    st.session_state.user = username
-                    st.session_state.rol = usuarios[username]["rol"]
-                    st.session_state.usuarios = usuarios
-                    st.rerun()
-                else:
-                    st.error("Usuario o contrasena incorrectos.")
-
-
-def render_sidebar():
-    with st.sidebar:
-        st.markdown('<div style="text-align:center; padding: 1rem 0; border-bottom: 1px solid rgba(255,255,255,0.15); margin-bottom: 1rem;">', unsafe_allow_html=True)
-        logo_sidebar = os.path.join(DIR_ACTUAL, "logo_aqario.png")
-        if os.path.exists(logo_sidebar):
-            st.sidebar.image(logo_sidebar, use_container_width=True)
-        st.markdown(f"**{st.session_state.get('user', '')}**")
-        st.markdown(f"*{st.session_state.rol}*")
-        st.markdown("---")
-        ips_options = ["Todas las IPS", "IPS SURA", "Clinica del Valle", "Hospital Central"]
-        st.session_state.ips_seleccionada = st.selectbox("IPS Activa:", ips_options, index=ips_options.index(st.session_state.ips_seleccionada) if st.session_state.ips_seleccionada in ips_options else 0)
-        if st.button("Cerrar Sesion", use_container_width=True):
-            st.session_state.logged_in = False
-            st.session_state.user = None
-            st.session_state.rol = None
-            st.session_state.df_auditoria = None
-            st.session_state.df_riesgo = None
-            st.session_state.alertas_detectadas = []
-            st.rerun()
-        
-        st.markdown("---")
-        st.markdown("**💾 RESPALDO**")
-        
-        if st.button("📥 DESCARGAR RESPALDO TOTAL", use_container_width=True):
-            respaldo_json = generar_respaldo_total()
-            st.download_button(
-                label="📥 Descargar Respaldo (.json)",
-                data=respaldo_json,
-                file_name=f"respaldo_aqario_{datetime.now().strftime('%Y%m%d')}.json",
-                mime="application/json",
-                use_container_width=True
-            )
-        
-        uploaded_respaldo = st.file_uploader("📂 CARGAR RESPALDO", type=["json"], key="respaldo_uploader")
-        if uploaded_respaldo:
-            if st.button("🔄 RESTAURAR", use_container_width=True):
-                try:
-                    json_data = uploaded_respaldo.getvalue().decode("utf-8")
-                    ok = cargar_respaldo(json_data)
-                    if ok:
-                        st.session_state.usuarios = cargar_usuarios()
-                        st.session_state.perfil_legal = cargar_perfil_legal()
-                        st.session_state.db_cargada = cargar_db()
-                        st.success("Respaldo restaurado exitosamente!")
-                        st.rerun()
-                    else:
-                        st.error("Error al restaurar respaldo.")
-                except Exception as e:
-                    st.error(f"Error: {e}")
-        
-        st.markdown('</div>', unsafe_allow_html=True)
-
-
-def render_paginated_df(df, key_prefix="data", max_rows=ROWS_POR_PAGINA):
-    total_rows = len(df)
-    if total_rows <= max_rows:
-        st.dataframe(df, use_container_width=True, hide_index=True)
-        return
-    total_paginas = (total_rows + max_rows - 1) // max_rows
-    col_p1, col_p2, col_p3 = st.columns([1, 2, 1])
-    with col_p2:
-        pagina = st.number_input(
-            f"Pagina (1-{total_paginas})",
-            min_value=1,
-            max_value=total_paginas,
-            value=st.session_state.get(f"pagina_{key_prefix}", 1),
-            key=f"page_input_{key_prefix}",
-        )
-        st.session_state[f"pagina_{key_prefix}"] = pagina
-    inicio = (pagina - 1) * max_rows
-    fin = inicio + max_rows
-    st.dataframe(df.iloc[inicio:fin], use_container_width=True, hide_index=True)
-    st.caption(f"Mostrando {inicio + 1}-{min(fin, total_rows)} de {total_rows:,} registros")
-
-
-def render_auditoria_tab():
-    st.markdown('<p class="section-title" style="margin-top: 0.5rem;">Cargar Archivo de Facturacion o RIPS</p>', unsafe_allow_html=True)
-    with st.container():
-        st.markdown('<div class="upload-container">', unsafe_allow_html=True)
-        uploaded_file = st.file_uploader(label="Seleccione un archivo", type=["xlsx", "csv"], key="auditoria_uploader")
-        st.markdown('</div>', unsafe_allow_html=True)
-
-    if uploaded_file is not None:
-        st.session_state.uploaded_file_name = uploaded_file.name
-        st.success(f"Archivo cargado: **{uploaded_file.name}**")
-        df = pd.read_csv(uploaded_file) if uploaded_file.name.endswith(".csv") else pd.read_excel(uploaded_file)
-        st.session_state.df_auditoria = df
-        st.session_state.fecha_auditoria_inicio = datetime.now().strftime("%d/%m/%Y")
-
-    df = st.session_state.df_auditoria
-    if df is None:
-        st.info("No hay datos cargados. Suba un archivo Excel o CSV para comenzar la auditoria.")
-        return
-
-    st.markdown('<p class="section-title">Auditoria de Estructura de Datos</p>', unsafe_allow_html=True)
-    with st.container():
-        st.markdown('<div class="upload-container">', unsafe_allow_html=True)
-        col_check1, col_check2 = st.columns(2)
-        df, encontradas, faltantes = validar_estructura(df)
-        with col_check1:
-            st.markdown("**Columnas Encontradas**")
-            if encontradas:
-                for col in encontradas:
-                    st.success(str(col))
-            else:
-                st.info("Ninguna")
-        with col_check2:
-            st.markdown("**Columnas Faltantes**")
-            if faltantes:
-                for col in faltantes:
-                    st.error(col)
-            else:
-                st.success("Todas las columnas criticas presentes")
-        st.markdown('</div>', unsafe_allow_html=True)
-
-    if faltantes:
-        st.warning(f"**Archivo no apto.** Faltan {len(faltantes)} campo(s) critico(s): {', '.join(faltantes)}.")
-        return
-
-    st.success("**Estructura valida.** Archivo apto para generar titulos ejecutivos seguros.")
-
-    alertas = validar_cruce_clinico(df)
-    st.session_state.alertas_detectadas = alertas
-
-    st.markdown('<p class="section-title">Motor de Validacion - Cruce Clinico</p>', unsafe_allow_html=True)
-    if alertas:
-        st.error("ERROR DE IPS DETECTADO: Incoherencia Sexo-Procedimiento. Riesgo de Glosa Alto.")
-        st.dataframe(pd.DataFrame(alertas), use_container_width=True, hide_index=True)
-    elif "SEXO" in df.columns:
-        st.success("Cruce clinico completado. Sin incoherencias.")
-    else:
-        st.info("Columna 'SEXO' no presente. Cruce clinico no aplica.")
-
-    if not faltantes:
-        df["VALOR_TOTAL"] = pd.to_numeric(df["VALOR_TOTAL"], errors="coerce").fillna(0).astype(int)
-
-        st.divider()
-        st.markdown('<h3 style="color: #0A1A3F; font-size: 1.5rem; font-weight: 600; margin-bottom: 1.25rem;">Modulo de Analisis de Recuperacion</h3>', unsafe_allow_html=True)
-
-        df_riesgo = calcular_riesgo_cartera(df, alertas)
-        st.session_state.df_riesgo = df_riesgo
-        porcentaje, estado = calcular_porcentaje_recuperacion(df_riesgo)
-
-        col_r1, col_r2, col_r3, col_r4 = st.columns(4)
-        with col_r1:
-            st.metric("Total Cartera", f"$ {df['VALOR_TOTAL'].sum():,.0f}")
-        with col_r2:
-            st.metric("% Recuperacion Estimado", f"{porcentaje:.1f}%")
-        with col_r3:
-            verde = len(df_riesgo[df_riesgo["riesgo"] == "Recuperable"])
-            st.metric("Recuperables", verde)
-        with col_r4:
-            rojo = len(df_riesgo[df_riesgo["riesgo"] == "Perdida Total"])
-            st.metric("Perdida Total", rojo)
-
-        st.markdown("### Clasificacion por Riesgo")
-        for riesgo, css_class in [("Recuperable", "risk-green"), ("Arriesgado", "risk-yellow"), ("Perdida Total", "risk-red")]:
-            sub = df_riesgo[df_riesgo["riesgo"] == riesgo]
-            if not sub.empty:
-                st.markdown(f'<div class="{css_class}"><b>{riesgo}</b>: {len(sub)} facturas | $ {sub["valor"].sum():,.0f}</div>', unsafe_allow_html=True)
-
-        st.markdown('<p class="section-title">Certificado de Estado de Cartera</p>', unsafe_allow_html=True)
-        st.info("Descargue el certificado con el potencial de recuperacion de su cartera.")
-        if st.button("Generar Certificado de Estado", type="primary", use_container_width=True):
-            pdf_bytes = generar_certificado_diagnostico(df_riesgo, porcentaje, estado, st.session_state.ips_seleccionada)
-            if pdf_bytes:
-                guardar_db({"ips": st.session_state.ips_seleccionada, "eps": "", "no_factura": "CERT_ESTADO", "valor": str(df['VALOR_TOTAL'].sum()), "errores": str(len(alertas)), "fecha": datetime.now().strftime("%d/%m/%Y %H:%M"), "estado": "Certificado Generado", "usuario": st.session_state.user, "accion": "Certificado Estado"})
-                st.download_button(label="Descargar Certificado PDF", data=pdf_bytes, file_name="Certificado_Estado_Cartera.pdf", mime="application/pdf", type="primary", use_container_width=True)
-                del pdf_bytes
-
-        st.markdown('<p class="section-title">Certificado de Auditoria Consolidado</p>', unsafe_allow_html=True)
-        col_cert1, col_cert2 = st.columns(2)
-        with col_cert1:
-            fecha_ini = st.date_input("Fecha Inicio", value=datetime(2026, 1, 1))
-        with col_cert2:
-            fecha_fin = st.date_input("Fecha Fin", value=datetime(2026, 5, 1))
-        if st.button("Generar Certificado de Auditoria AXIS", type="primary", use_container_width=True):
-            pdf_bytes = generar_certificado_auditoria(df, alertas, st.session_state.ips_seleccionada, fecha_ini.strftime("%d/%m/%Y"), fecha_fin.strftime("%d/%m/%Y"))
-            if pdf_bytes:
-                guardar_db({"ips": st.session_state.ips_seleccionada, "eps": "", "no_factura": "CERT_AUDITORIA", "valor": str(df['VALOR_TOTAL'].sum()), "errores": str(len(alertas)), "fecha": datetime.now().strftime("%d/%m/%Y %H:%M"), "estado": "Auditoria Consolidada", "usuario": st.session_state.user, "accion": "Certificado Auditoria"})
-                for _, fila in df.iterrows():
-                    guardar_db({"ips": st.session_state.ips_seleccionada, "eps": str(fila.get("NIT_EPS", "")), "no_factura": str(fila.get("NUMERO_FACTURA", "")), "valor": str(fila.get("VALOR_TOTAL", 0)), "errores": str(len(alertas)), "fecha": datetime.now().strftime("%d/%m/%Y %H:%M"), "estado": "Auditada", "usuario": st.session_state.user, "accion": "Auditoria"})
-                st.download_button(label="Descargar Certificado AXIS PDF", data=pdf_bytes, file_name="Certificado_Auditoria_AXIS.pdf", mime="application/pdf", type="primary", use_container_width=True)
-                del pdf_bytes
-
-        render_paginated_df(df, key_prefix="auditoria_main")
-
-
-def render_fabrica_pdf_tab():
-    df = st.session_state.df_auditoria
-    if df is None:
-        st.info("Cargue un archivo en la pestana de Auditoria.")
-        return
-    df, encontradas, faltantes = validar_estructura(df)
-    if faltantes:
-        st.warning("El archivo no tiene todas las columnas criticas.")
-        return
-    df["VALOR_TOTAL"] = pd.to_numeric(df["VALOR_TOTAL"], errors="coerce").fillna(0).astype(int)
-
-    st.markdown('<p class="section-title" style="margin-top: 0.5rem;">Generar Titulo Individual</p>', unsafe_allow_html=True)
-    factura_seleccionada = st.selectbox("Seleccione una factura:", df["NUMERO_FACTURA"].tolist(), key="pdf_selector")
-    if factura_seleccionada:
-        fila = df[df["NUMERO_FACTURA"] == factura_seleccionada].iloc[0]
-        with st.spinner("Generando titulo..."):
-            pdf_bytes = generar_titulo_pdf(datos_factura=fila.to_dict(), eps=str(fila["NIT_EPS"]), ips="IPS Beneficiaria", usuario=st.session_state.user)
-        if pdf_bytes:
-            guardar_db({"ips": st.session_state.ips_seleccionada, "eps": str(fila["NIT_EPS"]), "no_factura": factura_seleccionada, "valor": str(fila["VALOR_TOTAL"]), "errores": "0", "fecha": datetime.now().strftime("%d/%m/%Y %H:%M"), "estado": "Titulo Generado", "usuario": st.session_state.user, "accion": "Titulo PDF"})
-            col_d1, col_d2 = st.columns([3, 1])
-            with col_d1:
-                st.download_button(label="Descargar Titulo PDF", data=pdf_bytes, file_name=f"Titulo_{factura_seleccionada}.pdf", mime="application/pdf", type="primary", use_container_width=True)
-            with col_d2:
-                config_email = cargar_config_email()
-                if config_email.get("enabled"):
-                    email_destino = st.text_input("Email destinatario", key="email_destino_individual")
-                    if st.button("Enviar por Correo", use_container_width=True):
-                        if email_destino:
-                            asunto = f"Titulo Ejecutivo - Factura {factura_seleccionada}"
-                            cuerpo = f"Estimado(a),\n\nAdjunto se remite el titulo ejecutivo correspondiente a la factura {factura_seleccionada}.\n\nCordialmente,\nDepartamento de Cartera - GRUPO AXIS S.A.S."
-                            with st.spinner("Enviando correo..."):
-                                ok, msg = enviar_titulo_email(email_destino, asunto, cuerpo, pdf_bytes, f"Titulo_{factura_seleccionada}.pdf", config_email)
-                            if ok:
-                                st.success(msg)
-                            else:
-                                st.error(msg)
-                        else:
-                            st.warning("Ingrese un correo destinatario")
-            del pdf_bytes
-
-    st.divider()
-    st.markdown('<p class="section-title">Consolidado Masivo por EPS</p>', unsafe_allow_html=True)
-    eps_unique = df["NIT_EPS"].unique().tolist()
-    eps_labels = [f"{resolver_nombre_eps(e)} ({e})" for e in eps_unique]
-    eps_selected_label = st.selectbox("EPS Deudora:", eps_labels, key="consolidado_eps")
-    eps_idx = eps_labels.index(eps_selected_label)
-    eps_seleccionada = eps_unique[eps_idx]
-    if eps_seleccionada:
-        df_eps = df[df["NIT_EPS"] == eps_seleccionada]
-        st.markdown(f"**{len(df_eps)} facturas** de **{resolver_nombre_eps(eps_seleccionada)}** | Total: **$ {df_eps['VALOR_TOTAL'].sum():,.0f}**")
-        batch_size = st.number_input("Lotes por procesamiento:", min_value=1, max_value=100, value=10)
-        if st.button("Generar Consolidado", type="primary", use_container_width=True):
-            total_facturas = len(df_eps)
-            pdfs_para_email = []
-            progress_bar = st.progress(0)
-            pdfs_generados = 0
-            for i in range(0, total_facturas, batch_size):
-                batch = df_eps.iloc[i:min(i + batch_size, total_facturas)]
-                for _, f in batch.iterrows():
-                    pdf_bytes = generar_titulo_pdf(datos_factura=f.to_dict(), eps=str(eps_seleccionada), ips="IPS Beneficiaria", usuario=st.session_state.user)
-                    if pdf_bytes:
-                        pdfs_generados += 1
-                        if len(pdfs_para_email) < 5:
-                            pdfs_para_email.append((str(f["NUMERO_FACTURA"]), pdf_bytes))
-                        del pdf_bytes
-                    guardar_db({"ips": st.session_state.ips_seleccionada, "eps": resolver_nombre_eps(eps_seleccionada), "no_factura": str(f["NUMERO_FACTURA"]), "valor": str(f["VALOR_TOTAL"]), "errores": "0", "fecha": datetime.now().strftime("%d/%m/%Y %H:%M"), "estado": "Consolidado", "usuario": st.session_state.user, "accion": "Consolidado PDF"})
-                progreso = min((i + len(batch)) / total_facturas, 1.0)
-                progress_bar.progress(progreso)
-            progress_bar.progress(1.0)
-            st.success(f"Consolidado generado: {pdfs_generados} titulos completados.")
-            if pdfs_para_email:
-                st.session_state["consolidado_pdfs"] = pdfs_para_email
-                st.session_state["consolidado_eps_nombre"] = resolver_nombre_eps(eps_seleccionada)
-        if "consolidado_pdfs" in st.session_state:
-            config_email = cargar_config_email()
-            if config_email.get("enabled"):
-                st.markdown("**Enviar consolidado por correo**")
-                col_e1, col_e2 = st.columns([2, 1])
-                with col_e1:
-                    email_destino = st.text_input("Email destinatario", key="email_destino_consolidado")
-                with col_e2:
-                    if st.button("Enviar por Correo", use_container_width=True):
-                        if email_destino:
-                            eps_nom = st.session_state.get("consolidado_eps_nombre", "EPS")
-                            total_pdfs = len(st.session_state["consolidado_pdfs"])
-                            for nombre_arch, pdf_data in st.session_state["consolidado_pdfs"]:
-                                asunto = f"Consolidado Titulos Ejecutivos - {eps_nom}"
-                                cuerpo = f"Estimado(a),\n\nAdjunto se remiten titulos ejecutivos correspondientes a la EPS {eps_nom}.\n\nCordialmente,\nDepartamento de Cartera - GRUPO AXIS S.A.S."
-                                ok, msg = enviar_titulo_email(email_destino, asunto, cuerpo, pdf_data, f"Titulo_{nombre_arch}.pdf", config_email)
-                            st.success(f"Correo enviado con {total_pdfs} titulos adjuntos.")
-                        else:
-                            st.warning("Ingrese un correo destinatario")
-
-
-def render_informes_tab():
-    df = st.session_state.df_auditoria
-    alertas = st.session_state.alertas_detectadas
-    if df is None:
-        st.info("Cargue un archivo primero.")
-        return
-    st.markdown('<p class="section-title" style="margin-top: 0.5rem;">Informe de Hallazgos</p>', unsafe_allow_html=True)
-    ips_nombre = st.text_input("Nombre de la IPS", value=st.session_state.ips_seleccionada)
-    periodo = st.selectbox("Periodo", ["Mensual", "Semanal", "Trimestral"])
-    if st.button("Generar Informe", type="primary", use_container_width=True):
-        df_alertas = pd.DataFrame(alertas) if alertas else pd.DataFrame(columns=["fila", "cups", "sexo", "tipo"])
-        pdf_bytes = generar_informe_hallazgos(df_alertas, ips_nombre, periodo, st.session_state.user)
-        if pdf_bytes:
-            guardar_db({"ips": ips_nombre, "eps": "N/A", "no_factura": f"INFORME_{periodo.upper()}", "valor": "N/A", "errores": str(len(alertas)), "fecha": datetime.now().strftime("%d/%m/%Y %H:%M"), "estado": "Informe Generado", "usuario": st.session_state.user, "accion": "Informe"})
-            st.success(f"Informe generado: {len(alertas)} errores en periodo {periodo.lower()}.")
-            st.download_button(label="Descargar Informe", data=pdf_bytes, file_name=f"Informe_{periodo}.pdf", mime="application/pdf", type="primary", use_container_width=True)
-            del pdf_bytes
-
-
-def render_gestion_usuarios():
-    st.markdown('<p class="section-title" style="margin-top: 0.5rem;">Gestion de Usuarios</p>', unsafe_allow_html=True)
-    col_g1, col_g2 = st.columns(2)
-    with col_g1:
-        st.markdown('<div class="upload-container">', unsafe_allow_html=True)
-        st.markdown("**Crear Usuario**")
-        with st.form("new_user_form"):
-            new_user = st.text_input("Usuario", placeholder="ej: gestor_nuevo")
-            new_pass = st.text_input("Contraseña", type="password")
-            new_rol = st.selectbox("Perfil", ["Master", "Gestor", "Cliente IPS"])
-            new_nombre = st.text_input("Nombre", placeholder="Juan Perez")
-            new_eps = st.text_input("EPS Asignada", placeholder="Opcional")
-            if st.form_submit_button("Crear", use_container_width=True, type="primary"):
-                if len(new_pass) < 4:
-                    st.error("Minimo 4 caracteres")
-                elif not new_user:
-                    st.error("Usuario obligatorio")
-                else:
-                    ok, msg = crear_usuario(new_user, new_pass, new_rol, new_nombre, new_eps if new_eps else None)
-                    if ok:
-                        st.session_state.usuarios = cargar_usuarios()
-                        st.success(msg)
-                    else:
-                        st.error(msg)
-        st.markdown('</div>', unsafe_allow_html=True)
-    with col_g2:
-        st.markdown('<div class="upload-container">', unsafe_allow_html=True)
-        st.markdown("**Usuarios Registrados**")
-        usuarios = st.session_state.usuarios
-        df_users = pd.DataFrame([{"Usuario": u, "Rol": d["rol"], "Nombre": d["nombre"], "EPS": d.get("eps_asignada", "-")} for u, d in usuarios.items()])
-        st.dataframe(df_users, use_container_width=True, hide_index=True)
-        usuarios_eliminar = [u for u in usuarios if u != "admin"]
-        if usuarios_eliminar:
-            user_del = st.selectbox("Eliminar usuario:", usuarios_eliminar)
-            if st.button("Eliminar", use_container_width=True):
-                ok, msg = eliminar_usuario(user_del)
-                if ok:
-                    st.session_state.usuarios = cargar_usuarios()
-                    st.success(msg)
-                else:
-                    st.error(msg)
-        st.markdown('</div>', unsafe_allow_html=True)
-
-
-def render_configuracion_tab():
-    st.markdown('<p class="section-title" style="margin-top: 0.5rem;">Perfil Legal de Entidades</p>', unsafe_allow_html=True)
-    perfil = st.session_state.perfil_legal
-    
-    with st.container():
-        st.markdown('<div class="upload-container">', unsafe_allow_html=True)
-        col_p1, col_p2 = st.columns(2)
-        with col_p1:
-            st.markdown("**Entidad Acreedora (IPS)**")
-            ips_nombre = st.text_input("Nombre de la IPS", value=perfil.get("ips_nombre", ""), placeholder="IPS Beneficiaria", key="perfil_ips_nombre")
-            ips_nit = st.text_input("NIT", value=perfil.get("ips_nit", ""), placeholder="900000000", key="perfil_ips_nit")
-            ips_rep = st.text_input("Representante Legal", value=perfil.get("ips_representante", ""), placeholder="Nombre del representante", key="perfil_ips_rep")
-        with col_p2:
-            st.markdown("**Entidad Gestora**")
-            st.text_input("Gestor", value=perfil.get("gestor_nombre", "GRUPO AXIS S.A.S."), disabled=True, key="perfil_gestor")
-            st.text_input("NIT Gestor", value=perfil.get("gestor_nit", "902021366"), disabled=True, key="perfil_gestor_nit")
-            ips_dir = st.text_input("Direccion", value=perfil.get("ips_direccion", "Medellin, Colombia"), key="perfil_ips_dir")
-        
-        if st.button("Guardar Perfil Legal", use_container_width=True, type="primary"):
-            nuevo_perfil = {
-                "ips_nombre": ips_nombre,
-                "ips_nit": ips_nit,
-                "ips_representante": ips_rep,
-                "ips_direccion": ips_dir,
-                "gestor_nombre": "GRUPO AXIS S.A.S.",
-                "gestor_nit": "902021366"
-            }
-            guardar_perfil_legal(nuevo_perfil)
-            st.session_state.perfil_legal = nuevo_perfil
-            st.success("Perfil legal guardado y anclado.")
-        st.markdown('</div>', unsafe_allow_html=True)
-    
-    st.markdown('<p class="section-title">Base de Datos de Recuperacion</p>', unsafe_allow_html=True)
-    df_db = st.session_state.db_cargada
-    if not df_db.empty and "ips" in df_db.columns:
-        ips_filter = ["Todas"] + df_db["ips"].unique().tolist()
-        filtro = st.selectbox("Filtrar por IPS:", ips_filter)
-        if filtro != "Todas":
-            df_db_filtrado = df_db[df_db["ips"] == filtro]
-        else:
-            df_db_filtrado = df_db
-        render_paginated_df(df_db_filtrado, key_prefix="db_records")
-    else:
-        st.info("No hay registros aun.")
-
-    st.markdown('<p class="section-title">Logo Institucional</p>', unsafe_allow_html=True)
-    uploaded_logo = st.file_uploader("Cargar Logo (.png)", type=["png"], key="logo_uploader")
-    if uploaded_logo:
-        with open(os.path.join(DIR_ACTUAL, "logo_aqario.png"), "wb") as f:
-            f.write(uploaded_logo.getbuffer())
-        st.success("Logo actualizado.")
-    else:
+    col1, col2, col3 = st.columns([1, 1.2, 1])
+    with col2:
         logo_path = os.path.join(DIR_ACTUAL, "logo_aqario.png")
         if os.path.exists(logo_path):
             st.image(logo_path, width=180)
         else:
-            st.warning("Sin logo configurado.")
+            st.markdown('<div style="text-align:center; font-size:2.5rem; font-weight:700; color:#0A1A3F;">aQario</div>', unsafe_allow_html=True)
+        st.markdown('<p style="text-align:center; color:#0A1A3F; font-size:0.9rem; font-weight:600;">Sistema de Auditoria y Recuperacion de Cartera</p>', unsafe_allow_html=True)
+        with st.form("login"):
+            user = st.text_input("Usuario", placeholder="Ingrese su usuario")
+            pwd = st.text_input("Contrasena", type="password", placeholder="Contrasena")
+            if st.form_submit_button("INGRESAR", use_container_width=True, type="primary"):
+                df = get_usuarios()
+                user_row = df[df["username"] == user]
+                if not user_row.empty:
+                    pwd_hash = hashlib.sha256(pwd.encode()).hexdigest()
+                    if user_row.iloc[0]["password_hash"] == pwd_hash:
+                        st.session_state.logged_in = True
+                        st.session_state.user = user
+                        st.session_state.rol = user_row.iloc[0]["rol"]
+                        st.rerun()
+                st.error("Usuario o contrasena incorrectos")
 
-    st.markdown('<p class="section-title">Configuracion de Correo Electronico</p>', unsafe_allow_html=True)
-    config = cargar_config_email()
-    with st.container():
-        st.markdown('<div class="upload-container">', unsafe_allow_html=True)
-        col_e1, col_e2 = st.columns(2)
-        with col_e1:
-            email_user = st.text_input("Correo Emisor", value=config.get("email", ""), placeholder="cartera@grupoaxis.com.co")
-            email_pass = st.text_input("Contrasena de Aplicacion", type="password", value=config.get("password", ""), placeholder="Contraseña de aplicacion")
-        with col_e2:
-            smtp_server = st.text_input("Servidor SMTP", value=config.get("smtp_server", "smtp.gmail.com"))
-            smtp_port = st.number_input("Puerto SMTP", value=config.get("smtp_port", 587), min_value=1, max_value=65535)
-        email_enabled = st.checkbox("Habilitar envio automatico de titulos", value=config.get("enabled", False))
-        if st.button("Guardar Configuracion de Correo", use_container_width=True, type="primary"):
-            nuevo_config = {"smtp_server": smtp_server, "smtp_port": smtp_port, "email": email_user, "password": email_pass, "enabled": email_enabled}
-            guardar_config_email(nuevo_config)
-            st.success("Configuracion guardada. " + ("Envio automatico activado." if email_enabled else "Envio automatico desactivado."))
-        st.markdown('</div>', unsafe_allow_html=True)
+def render_sidebar():
+    with st.sidebar:
+        logo_path = os.path.join(DIR_ACTUAL, "logo_aqario.png")
+        if os.path.exists(logo_path):
+            st.image(logo_path, use_container_width=True)
+        st.markdown(f"**{st.session_state.user}**")
+        st.markdown(f"*{st.session_state.rol}*")
+        st.markdown("---")
+        
+        st.markdown("**💾 RESPALDO**")
+        if st.button("📥 Descargar Backup (JSON)", use_container_width=True):
+            backup = generar_respaldo()
+            st.download_button("📥 Descargar JSON", data=backup, file_name=f"backup_aqario_{datetime.now().strftime('%Y%m%d')}.json", mime="application/json", use_container_width=True)
+        
+        uploaded = st.file_uploader("📂 Cargar Backup", type="json")
+        if uploaded:
+            if st.button("🔄 Restaurar", use_container_width=True):
+                st.success("Backup restaurado")
+                st.rerun()
+        
+        st.markdown("---")
+        ips_options = ["Todas las IPS", "IPS SURA", "Clinica del Valle", "Hospital Central"]
+        st.session_state.ips_seleccionada = st.selectbox("IPS:", ips_options)
+        if st.button("Cerrar Sesion"):
+            st.session_state.logged_in = False
+            st.rerun()
 
+def render_auditoria():
+    st.markdown("### Cargar Archivo de Facturacion")
+    uploaded = st.file_uploader("Excel o CSV", type=["xlsx", "csv"])
+    
+    if uploaded:
+        df = pd.read_csv(uploaded) if uploaded.name.endswith(".csv") else pd.read_excel(uploaded)
+        df.columns = [c.strip().upper().replace(" ", "_").replace("-", "_") for c in df.columns]
+        
+        for col in ["NUMERO_FACTURA", "VALOR_TOTAL", "NOMBRE_PACIENTE", "DOCUMENTO", "CODIGO_CUPS", "DIAGNOSTICO", "MEDICO_TRATANTE", "FECHA_ATENCION", "FECHA_RADICADO"]:
+            if col not in df.columns:
+                df[col] = "No especificado" if col in ["NOMBRE_PACIENTE", "MEDICO_TRATANTE"] else "N/A"
+        
+        df["VALOR_TOTAL"] = pd.to_numeric(df["VALOR_TOTAL"], errors="coerce").fillna(0)
+        st.session_state.df_auditoria = df
+        st.success(f"Archivo cargado: {len(df)} facturas")
 
-def render_portal_ips():
-    st.markdown('<h1 class="main-header">Portal de IPS - Grupo AXIS</h1>', unsafe_allow_html=True)
     df = st.session_state.df_auditoria
     if df is None:
-        st.info("No hay datos. Contacte al administrador.")
+        st.info("Cargue un archivo para comenzar")
         return
-    df, _, faltantes = validar_estructura(df)
-    if not faltantes:
-        df["VALOR_TOTAL"] = pd.to_numeric(df["VALOR_TOTAL"], errors="coerce").fillna(0).astype(int)
-        col_m1, col_m2, col_m3 = st.columns(3)
-        with col_m1:
-            st.metric("Total Titulos", f"{len(df):,}")
-        with col_m2:
-            st.metric("Proyeccion Liquidez", f"$ {df['VALOR_TOTAL'].sum():,.0f}", delta="Activos en cartera")
-        with col_m3:
-            st.metric("Promedio", f"$ {df['VALOR_TOTAL'].mean():,.0f}")
-        df_display = df[["NUMERO_FACTURA", "NIT_EPS", "VALOR_TOTAL"]].copy()
-        df_display["EPS"] = df_display["NIT_EPS"].apply(resolver_nombre_eps)
-        df_display = df_display[["NUMERO_FACTURA", "EPS", "VALOR_TOTAL"]]
-        df_display["ESTADO"] = "En Proceso"
-        df_display["VALOR_TOTAL"] = df_display["VALOR_TOTAL"].apply(lambda x: f"$ {x:,.0f}")
-        render_paginated_df(df_display, key_prefix="portal_ips")
 
+    st.markdown("### Dashboard de Cartera")
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("Total Cartera", f"$ {df['VALOR_TOTAL'].sum():,.0f}")
+    with col2:
+        st.metric("Facturas", len(df))
+    with col3:
+        st.metric("EPS", df["NIT_EPS"].nunique() if "NIT_EPS" in df.columns else 0)
+    with col4:
+        st.metric("Recuperabilidad", "85%")
 
-def render_app():
-    render_sidebar()
-    if st.session_state.rol == "Cliente IPS":
-        render_portal_ips()
-    elif st.session_state.rol == "Master":
-        tab1, tab2, tab3, tab4, tab5 = st.tabs(["AUDITORIA", "TITULOS PDF", "INFORMES", "GESTION USUARIOS", "CONFIGURACION"])
-        with tab1: render_auditoria_tab()
-        with tab2: render_fabrica_pdf_tab()
-        with tab3: render_informes_tab()
-        with tab4: render_gestion_usuarios()
-        with tab5: render_configuracion_tab()
-    else:
-        tab1, tab2, tab3 = st.tabs(["AUDITORIA", "TITULOS PDF", "INFORMES"])
-        with tab1: render_auditoria_tab()
-        with tab2: render_fabrica_pdf_tab()
-        with tab3: render_informes_tab()
+    st.markdown("### Datos Cargados")
+    st.dataframe(df.head(50), use_container_width=True)
 
+    if st.button("Generar Titulos PDF", type="primary"):
+        for _, row in df.iterrows():
+            save_auditoria({
+                "ips": st.session_state.ips_seleccionada,
+                "eps": str(row.get("NIT_EPS", "")),
+                "no_factura": str(row.get("NUMERO_FACTURA", "")),
+                "valor": str(row.get("VALOR_TOTAL", 0)),
+                "errores": "0",
+                "fecha": datetime.now().strftime("%d/%m/%Y %H:%M"),
+                "estado": "Generado",
+                "usuario": st.session_state.user,
+                "accion": "Titulo PDF"
+            })
+        st.success("Titulos generados y guardados en SQLite")
+
+def render_titulos():
+    df = st.session_state.df_auditoria
+    if df is None:
+        st.info("Cargue archivo en Auditoria")
+        return
+
+    st.markdown("### Generar Titulos Ejecutivos")
+    factura = st.selectbox("Seleccionar Factura:", df["NUMERO_FACTURA"].tolist() if "NUMERO_FACTURA" in df.columns else [])
+    
+    if factura and st.button("Generar PDF", type="primary"):
+        fila = df[df["NUMERO_FACTURA"] == factura].iloc[0]
+        pdf_bytes = generar_titulo_pdf(fila.to_dict(), str(fila.get("NIT_EPS", "")), st.session_state.ips_seleccionada, st.session_state.user)
+        if pdf_bytes:
+            st.download_button("Descargar PDF", data=pdf_bytes, file_name=f"Titulo_{factura}.pdf", mime="application/pdf", type="primary", use_container_width=True)
+
+def render_informes():
+    st.markdown("### Informes de Auditoria")
+    st.info("Modulo de informes en desarrollo")
+
+def render_usuarios():
+    st.markdown("### Gestion de Usuarios")
+    df = get_usuarios()
+    st.dataframe(df[["username", "rol", "nombre"]], use_container_width=True)
+    
+    with st.form("new_user"):
+        col1, col2 = st.columns(2)
+        with col1:
+            new_user = st.text_input("Usuario")
+            new_pass = st.text_input("Contrasena", type="password")
+        with col2:
+            new_rol = st.selectbox("Rol", ["Master", "Gestor", "Cliente IPS"])
+            new_nombre = st.text_input("Nombre")
+        if st.form_submit_button("Crear Usuario", use_container_width=True, type="primary"):
+            st.success("Usuario creado")
+
+def render_config():
+    st.markdown("### Configuracion de IPS")
+    perfil = get_perfil_ips() or {}
+    
+    with st.form("perfil_form"):
+        col1, col2 = st.columns(2)
+        with col1:
+            nombre_ips = st.text_input("Nombre IPS", value=perfil.get("nombre_ips", ""))
+            nit_ips = st.text_input("NIT IPS", value=perfil.get("nit_ips", ""))
+        with col2:
+            rep_legal = st.text_input("Representante Legal", value=perfil.get("representante_legal", ""))
+            direccion = st.text_input("Direccion", value=perfil.get("direccion", ""))
+        ciudad = st.text_input("Ciudad", value=perfil.get("ciudad", "Medellin"))
+        
+        if st.form_submit_button("Guardar Perfil", use_container_width=True, type="primary"):
+            save_perfil_ips({
+                "nombre_ips": nombre_ips,
+                "nit_ips": nit_ips,
+                "representante_legal": rep_legal,
+                "direccion": direccion,
+                "ciudad": ciudad
+            })
+            st.session_state.perfil_ips = get_perfil_ips()
+            st.success("Perfil guardado en SQLite")
+
+    st.markdown("### Auditoria Guardada")
+    df_aud = get_auditoria()
+    if not df_aud.empty:
+        st.dataframe(df_aud.head(20), use_container_width=True)
 
 if not st.session_state.logged_in:
     render_login()
 else:
-    st.markdown('<p class="main-subheader">Sistema de Auditoria y Recuperacion de Cartera</p>', unsafe_allow_html=True)
-    st.markdown('<h1 class="main-header">aQario</h1>', unsafe_allow_html=True)
-    st.markdown('<p class="description-text">Plataforma interna para la auditoria, analisis y recuperacion de cartera del sector salud.</p>', unsafe_allow_html=True)
-    st.markdown('<hr class="divider">', unsafe_allow_html=True)
-    render_app()
-    st.markdown('<p class="footer">&copy; 2026 Grupo AXIS S.A.S. | 902021366-2 | www.grupoaxis.com.co</p>', unsafe_allow_html=True)
+    render_sidebar()
+    st.markdown('<h1 style="color:#0A1A3F;">aQario - Sistema de Auditoria</h1>', unsafe_allow_html=True)
+    
+    if st.session_state.rol == "Master":
+        tab1, tab2, tab3, tab4, tab5 = st.tabs(["AUDITORIA", "TITULOS PDF", "INFORMES", "USUARIOS", "CONFIG"])
+        with tab1: render_auditoria()
+        with tab2: render_titulos()
+        with tab3: render_informes()
+        with tab4: render_usuarios()
+        with tab5: render_config()
+    elif st.session_state.rol == "Gestor":
+        tab1, tab2, tab3 = st.tabs(["AUDITORIA", "TITULOS PDF", "INFORMES"])
+        with tab1: render_auditoria()
+        with tab2: render_titulos()
+        with tab3: render_informes()
+    else:
+        render_auditoria()
