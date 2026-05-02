@@ -19,7 +19,7 @@ st.set_page_config(page_title="aQario", page_icon="📊", layout="wide", initial
 
 DIR_ACTUAL = os.path.dirname(os.path.abspath(__file__))
 
-COLUMNAS_CRITICAS = ["NUMERO_FACTURA", "VALOR_TOTAL", "NIT_EPS", "FECHA_RADICADO", "CODIGO_CUPS", "DIAGNOSTICO", "NOMBRE_PACIENTE", "DOCUMENTO", "FECHA_ATENCION", "MEDICO_TRATANTE"]
+COLUMNAS_CRITICAS = ["NUMERO_FACTURA", "VALOR_TOTAL"]
 
 EPS_NOMBRES = {800123456: "Nueva EPS", 800234567: "SURA EPS", 800345678: "Salud Total", 800456789: "Coomeva", 900111222: "Sanitas"}
 
@@ -237,11 +237,26 @@ def normalizar_columnas(cols):
 def validar_estructura(df):
     df_validado = df.copy()
     df_validado.columns = normalizar_columnas(df_validado.columns)
-    columnas_archivo = set(df_validado.columns)
-    columnas_esperadas = set(COLUMNAS_CRITICAS)
-    encontradas = columnas_esperadas & columnas_archivo
-    faltantes = columnas_esperadas - columnas_archivo
-    return df_validado, sorted(encontradas), sorted(faltantes)
+    
+    for col in COLUMNAS_CRITICAS:
+        if col not in df_validado.columns:
+            df_validado[col] = "N/A"
+    
+    campos_opcionales = {
+        "NOMBRE_PACIENTE": "N/A",
+        "DOCUMENTO": "N/A",
+        "FECHA_ATENCION": "N/A",
+        "MEDICO_TRATANTE": "No especificado",
+        "CODIGO_CUPS": "N/A",
+        "DIAGNOSTICO": "N/A",
+        "FECHA_RADICADO": "N/A",
+        "NIT_EPS": "N/A"
+    }
+    for col, default in campos_opcionales.items():
+        if col not in df_validado.columns:
+            df_validado[col] = default
+    
+    return df_validado, COLUMNAS_CRITICAS, []
 
 
 def validar_cruce_clinico(df):
