@@ -14,7 +14,7 @@ from email.mime.base import MIMEBase
 from email import encoders
 from fpdf import FPDF
 
-st.set_page_config(page_title="aQario", page_icon="", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="aQario", page_icon="📊", layout="wide", initial_sidebar_state="expanded")
 
 DIR_ACTUAL = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(DIR_ACTUAL, "db_axis_recovery.csv")
@@ -536,8 +536,10 @@ CUSTOM_CSS = """
     .risk-red { background-color: #FEF2F2; border-left: 4px solid #EF4444; padding: 12px 16px; border-radius: 8px; margin: 8px 0; }
 
     .stTabs [data-baseweb="tab-list"] { gap: 8px; }
-    .stTabs [data-baseweb="tab"] { background-color: #FFFFFF; border-radius: 8px; padding: 12px 24px; border: 1px solid #E5E7EB; color: #1C3D73; font-weight: 500; }
-    .stTabs [data-baseweb="tab-list"] button[aria-selected="true"] { background-color: #0A1A3F; color: #FFFFFF; border-color: #0A1A3F; }
+    .stTabs [data-baseweb="tab"] { background-color: #F3F4F6 !important; border-radius: 8px; padding: 12px 24px; border: 1px solid #E5E7EB; color: #0A1A3F !important; font-weight: 600 !important; }
+    .stTabs [data-baseweb="tab-list"] button[aria-selected="true"] { background-color: #0A1A3F !important; color: #FFFFFF !important; border-color: #0A1A3F !important; }
+    .stTabs [data-baseweb="tab"] span { color: #0A1A3F !important; }
+    .stTabs [data-baseweb="tab-list"] button[aria-selected="true"] span { color: #FFFFFF !important; }
 
     .stMetric { background-color: #FFFFFF; border-radius: 8px; padding: 1rem; }
 
@@ -611,9 +613,10 @@ def agregar_historial(nombre_archivo, tipo):
 def render_login():
     col_c1, col_c2, col_c3 = st.columns([1, 1.2, 1])
     with col_c2:
-        try:
-            st.image("logo_aqario.png", width=160)
-        except Exception:
+        logo_login = os.path.join(DIR_ACTUAL, "logo_aqario.png")
+        if os.path.exists(logo_login):
+            st.image(logo_login, width=160)
+        else:
             st.markdown('<div style="text-align:center; font-size:2.5rem; font-weight:700; color:#0A1A3F; margin-bottom:1rem;">aQario</div>', unsafe_allow_html=True)
         st.markdown('<p style="text-align:center; color:#5CA0F2; font-size:0.75rem; font-weight:600; letter-spacing:2px; text-transform:uppercase; margin-top:-0.75rem; margin-bottom:2rem;">Sistema de Auditoria y Recuperacion de Cartera</p>', unsafe_allow_html=True)
         with st.form("login_form"):
@@ -636,10 +639,9 @@ def render_login():
 def render_sidebar():
     with st.sidebar:
         st.markdown('<div style="text-align:center; padding: 1rem 0; border-bottom: 1px solid rgba(255,255,255,0.15); margin-bottom: 1rem;">', unsafe_allow_html=True)
-        try:
-            st.sidebar.image("logo_aqario.png", use_container_width=True)
-        except Exception:
-            pass
+        logo_sidebar = os.path.join(DIR_ACTUAL, "logo_aqario.png")
+        if os.path.exists(logo_sidebar):
+            st.sidebar.image(logo_sidebar, use_container_width=True)
         st.markdown(f"**{st.session_state.get('user', '')}**")
         st.markdown(f"*{st.session_state.rol}*")
         st.markdown("---")
@@ -710,8 +712,11 @@ def render_auditoria_tab():
         df, encontradas, faltantes = validar_estructura(df)
         with col_check1:
             st.markdown("**Columnas Encontradas**")
-            for col in encontradas if encontradas else ["Ninguna"]:
-                st.success(col) if encontradas else st.info(col)
+            if encontradas:
+                for col in encontradas:
+                    st.success(str(col))
+            else:
+                st.info("Ninguna")
         with col_check2:
             st.markdown("**Columnas Faltantes**")
             if faltantes:
@@ -982,7 +987,7 @@ def render_gestion_usuarios():
 def render_configuracion_tab():
     st.markdown('<p class="section-title" style="margin-top: 0.5rem;">Base de Datos de Recuperacion</p>', unsafe_allow_html=True)
     df_db = cargar_db()
-    if not df_db.empty:
+    if not df_db.empty and "ips" in df_db.columns:
         ips_filter = ["Todas"] + df_db["ips"].unique().tolist()
         filtro = st.selectbox("Filtrar por IPS:", ips_filter)
         if filtro != "Todas":
