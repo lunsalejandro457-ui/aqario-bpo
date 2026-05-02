@@ -20,7 +20,7 @@ DIR_ACTUAL = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(DIR_ACTUAL, "aqario.db")
 
 def clean_text(s):
-    return str(s).encode('latin-1', 'ignore').decode('latin-1')
+    return str(s).replace('—', '-').replace('–', '-').replace('"', '"').replace('"', '"').replace(''', "'").replace(''', "'").replace('…', '...').encode('latin-1', 'ignore').decode('latin-1')
 
 def init_db():
     conn = sqlite3.connect(DB_PATH)
@@ -135,11 +135,11 @@ class TituloPDF(FPDF):
             self.ln(20)
         except:
             self.set_font('Helvetica', 'B', 14)
-            self.cell(0, 10, 'aQario - GRUPO AXIS S.A.S.', ln=1)
+            self.cell(0, 10, clean_text('aQario - GRUPO AXIS S.A.S.'), ln=1)
         
         self.set_font("Helvetica", "I", 8)
         self.set_text_color(100, 100, 100)
-        self.cell(0, 5, "aQario | GRUPO AXIS S.A.S. | NIT 902021366 | Medellin", ln=1, align="R")
+        self.cell(0, 5, clean_text("aQario | GRUPO AXIS S.A.S. | NIT 902021366 | Medellin"), ln=1, align="R")
         self.ln(3)
         self.set_draw_color(10, 26, 63)
         self.set_line_width(0.5)
@@ -153,7 +153,7 @@ class TituloPDF(FPDF):
         self.ln(3)
         self.set_font("Helvetica", "I", 6)
         self.set_text_color(0, 0, 0)
-        self.cell(0, 4, f"Generado por: {self.usuario} | {self.fecha}", ln=1, align="C")
+        self.cell(0, 4, clean_text(f"Generado por: {self.usuario} | {self.fecha}"), ln=1, align="C")
 
 def generar_titulo_pdf(datos_factura, eps, ips, usuario):
     try:
@@ -168,12 +168,12 @@ def generar_titulo_pdf(datos_factura, eps, ips, usuario):
 
         pdf.set_font("Helvetica", "B", 14)
         pdf.set_text_color(10, 26, 63)
-        pdf.cell(0, 10, "NOTIFICACION FORMAL DE TITULO EJECUTIVO", ln=1, align="C")
+        pdf.cell(0, 10, clean_text("NOTIFICACION FORMAL DE TITULO EJECUTIVO"), ln=1, align="C")
         pdf.ln(5)
 
         pdf.set_font("Helvetica", "", 10)
         pdf.set_text_color(0, 0, 0)
-        pdf.cell(0, 6, f"Medellin, Colombia — {datetime.now().strftime('%d/%m/%Y')}", ln=1, align="R")
+        pdf.cell(0, 6, clean_text(f"Medellin, Colombia - {datetime.now().strftime('%d/%m/%Y')}"), ln=1, align="R")
         pdf.ln(5)
 
         ips_nombre = perfil.get("nombre_ips", ips or "IPS Beneficiaria")
@@ -181,7 +181,7 @@ def generar_titulo_pdf(datos_factura, eps, ips, usuario):
         
         pdf.set_font("Helvetica", "B", 11)
         pdf.set_text_color(10, 26, 63)
-        pdf.cell(0, 8, "DATOS DE LA OBLIGACION", ln=1)
+        pdf.cell(0, 8, clean_text("DATOS DE LA OBLIGACION"), ln=1)
         pdf.set_draw_color(10, 26, 63)
         pdf.line(15, pdf.get_y(), pdf.w - 15, pdf.get_y())
         pdf.ln(5)
@@ -224,12 +224,12 @@ def generar_titulo_pdf(datos_factura, eps, ips, usuario):
         
         valor = datos_factura.get("VALOR_TOTAL", 0)
         valor_str = f"$ {int(float(valor)):,.0f} COP" if isinstance(valor, (int, float)) else str(valor)
-        pdf.cell(0, 12, f"VALOR TOTAL A COBRAR: {valor_str}", border=1, fill=True, align="C", ln=1)
+        pdf.cell(0, 12, clean_text(f"VALOR TOTAL A COBRAR: {valor_str}"), border=1, fill=True, align="C", ln=1)
 
         pdf.ln(8)
         pdf.set_font("Helvetica", "B", 11)
         pdf.set_text_color(10, 26, 63)
-        pdf.cell(0, 8, "REQUERIMIENTO DE PAGO PRE-JURIDICO", ln=1)
+        pdf.cell(0, 8, clean_text("REQUERIMIENTO DE PAGO PRE-JURIDICO"), ln=1)
         pdf.ln(3)
         
         pdf.set_font("Helvetica", "", 9)
@@ -240,7 +240,7 @@ def generar_titulo_pdf(datos_factura, eps, ips, usuario):
         pdf.ln(8)
         pdf.set_font("Helvetica", "", 8)
         pdf.set_text_color(0, 0, 0)
-        pdf.multi_cell(0, 5, "Departamento de Recaudo y Gestion de Cartera — GRUPO AXIS S.A.S.\naQario es un software creado por Grupo AXIS S.A.S. NIT 902021366\nMedellin, Colombia | El Eje de su Crecimiento")
+        pdf.multi_cell(0, 5, clean_text("Departamento de Recaudo y Gestion de Cartera - GRUPO AXIS S.A.S. | aQario es un software creado por Grupo AXIS S.A.S. NIT 902021366 | Medellin, Colombia | El Eje de su Crecimiento"))
 
         output = pdf.output(dest="S")
         if isinstance(output, (bytes, bytearray)):
