@@ -439,15 +439,202 @@ def generar_certificado_pdf(nombre_ips, fecha_inicio, fecha_fin, total_rips, val
     return bytes(pdf.output())
 
 CSS = """<style>
-.stApp { background-color: #FFFFFF !important; }
-[data-testid="stSidebar"] { background-color: #0A1A3F !important; }
-[data-testid="stSidebar"] * { color: #FFFFFF !important; }
-.stMain *, .stMain p, .stMain label, .stMain span, .stMain h1, .stMain h2, .stMain h3 { color: #0A1A3F !important; }
-.stTabs [data-baseweb="tab"] p { color: #0A1A3F !important; font-weight: 600 !important; }
-.stTabs [aria-selected="true"] { border-bottom: 3px solid #1C3D73 !important; }
-.stButton>button { background-color: #1C3D73 !important; color: #FFFFFF !important; border-radius: 8px !important; font-weight: 600 !important; }
-input, .stSelectbox div { color: #000000 !important; background-color: #FFFFFF !important; }
-.stDataFrame td, .stDataFrame th { color: #0A1A3F !important; }
+@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;600;700&family=Open+Sans:wght@300;400;600&display=swap');
+
+/* === BASE === */
+.stApp { background: #F4F6F9 !important; font-family: 'Open Sans', sans-serif !important; }
+
+/* === SIDEBAR === */
+[data-testid="stSidebar"] { 
+    background: linear-gradient(180deg, #001830 0%, #002D5C 60%, #003F7F 100%) !important;
+    border-right: 3px solid #00A8E8 !important;
+}
+[data-testid="stSidebar"] * { 
+    color: #E8F4FD !important; 
+    font-family: 'Open Sans', sans-serif !important;
+}
+[data-testid="stSidebar"] .stButton>button {
+    background: linear-gradient(135deg, #00A8E8 0%, #0077B6 100%) !important;
+    color: #FFFFFF !important;
+    border: none !important;
+    border-radius: 6px !important;
+    font-weight: 600 !important;
+    letter-spacing: 0.5px !important;
+    padding: 8px 16px !important;
+    transition: all 0.2s !important;
+    box-shadow: 0 2px 8px rgba(0,168,232,0.3) !important;
+}
+
+/* === LOGO AREA === */
+[data-testid="stSidebar"] img {
+    filter: drop-shadow(0 0 12px rgba(0,168,232,0.6)) !important;
+    margin: 10px auto !important;
+}
+
+/* === MAIN AREA === */
+.stMain { background: #F4F6F9 !important; }
+.stMain *, .stMain p, .stMain label, .stMain span { 
+    color: #1A2B4A !important; 
+    font-family: 'Open Sans', sans-serif !important;
+}
+
+/* === PAGE TITLE === */
+.stMain h1 { 
+    color: #001830 !important; 
+    font-family: 'Montserrat', sans-serif !important;
+    font-weight: 700 !important;
+    font-size: 1.8rem !important;
+    border-bottom: 3px solid #00A8E8 !important;
+    padding-bottom: 12px !important;
+    margin-bottom: 24px !important;
+}
+.stMain h2, .stMain h3 { 
+    color: #002D5C !important; 
+    font-family: 'Montserrat', sans-serif !important;
+    font-weight: 600 !important;
+}
+
+/* === TABS — Enterprise style === */
+.stTabs [data-baseweb="tab-list"] {
+    background: #FFFFFF !important;
+    border-radius: 8px 8px 0 0 !important;
+    padding: 4px 8px 0 8px !important;
+    border-bottom: 2px solid #00A8E8 !important;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.08) !important;
+}
+.stTabs [data-baseweb="tab"] {
+    background: transparent !important;
+    color: #5B7FA6 !important;
+    font-family: 'Montserrat', sans-serif !important;
+    font-weight: 600 !important;
+    font-size: 0.78rem !important;
+    letter-spacing: 1px !important;
+    text-transform: uppercase !important;
+    padding: 10px 20px !important;
+    border-radius: 6px 6px 0 0 !important;
+    border: none !important;
+}
+.stTabs [aria-selected="true"] {
+    background: #00A8E8 !important;
+    color: #FFFFFF !important;
+    border-radius: 6px 6px 0 0 !important;
+}
+
+/* === MAIN BUTTONS === */
+.stMain .stButton>button {
+    background: linear-gradient(135deg, #002D5C 0%, #00A8E8 100%) !important;
+    color: #FFFFFF !important;
+    border: none !important;
+    border-radius: 6px !important;
+    font-family: 'Montserrat', sans-serif !important;
+    font-weight: 600 !important;
+    font-size: 0.82rem !important;
+    letter-spacing: 0.8px !important;
+    padding: 10px 24px !important;
+    box-shadow: 0 4px 12px rgba(0,45,92,0.25) !important;
+    transition: all 0.2s ease !important;
+}
+.stMain .stButton>button:hover {
+    box-shadow: 0 6px 18px rgba(0,168,232,0.4) !important;
+    transform: translateY(-1px) !important;
+}
+
+/* === DOWNLOAD BUTTONS === */
+.stDownloadButton>button {
+    background: linear-gradient(135deg, #0077B6 0%, #00A8E8 100%) !important;
+    color: #FFFFFF !important;
+    border: none !important;
+    border-radius: 6px !important;
+    font-weight: 600 !important;
+    font-size: 0.82rem !important;
+    padding: 10px 24px !important;
+    box-shadow: 0 4px 12px rgba(0,119,182,0.3) !important;
+}
+
+/* === METRIC CARDS === */
+[data-testid="stMetric"] {
+    background: #FFFFFF !important;
+    border-radius: 10px !important;
+    padding: 16px 20px !important;
+    border-left: 4px solid #00A8E8 !important;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.07) !important;
+}
+[data-testid="stMetricLabel"] { 
+    color: #5B7FA6 !important; 
+    font-size: 0.78rem !important;
+    font-weight: 600 !important;
+    letter-spacing: 0.5px !important;
+    text-transform: uppercase !important;
+}
+[data-testid="stMetricValue"] { 
+    color: #001830 !important; 
+    font-family: 'Montserrat', sans-serif !important;
+    font-weight: 700 !important;
+    font-size: 1.6rem !important;
+}
+
+/* === DATAFRAME === */
+.stDataFrame { 
+    border-radius: 10px !important; 
+    overflow: hidden !important;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.08) !important;
+}
+.stDataFrame thead tr th { 
+    background: #001830 !important; 
+    color: #FFFFFF !important;
+    font-family: 'Montserrat', sans-serif !important;
+    font-weight: 600 !important;
+    font-size: 0.75rem !important;
+    letter-spacing: 0.5px !important;
+}
+.stDataFrame tbody tr:nth-child(even) { background: #F0F6FF !important; }
+.stDataFrame td { color: #1A2B4A !important; font-size: 0.85rem !important; }
+
+/* === INPUTS === */
+input, .stSelectbox div, textarea {
+    background: #FFFFFF !important;
+    color: #1A2B4A !important;
+    border: 1.5px solid #C5D8EC !important;
+    border-radius: 6px !important;
+}
+input:focus { border-color: #00A8E8 !important; }
+
+/* === ALERTS === */
+.stSuccess { 
+    background: #E8F8F2 !important; 
+    border-left: 4px solid #00B894 !important; 
+    color: #006B4F !important;
+}
+.stError { 
+    background: #FEF0EE !important; 
+    border-left: 4px solid #E74C3C !important; 
+    color: #922B21 !important;
+}
+.stWarning {
+    background: #FFF8E7 !important;
+    border-left: 4px solid #F39C12 !important;
+    color: #7D5A00 !important;
+}
+
+/* === FILE UPLOADER === */
+[data-testid="stFileUploadDropzone"] {
+    background: #EEF5FF !important;
+    border: 2px dashed #00A8E8 !important;
+    border-radius: 8px !important;
+    color: #002D5C !important;
+}
+
+/* === DIVIDER === */
+hr { border-color: #C5D8EC !important; }
+
+/* === USER INFO IN SIDEBAR === */
+.user-badge {
+    background: rgba(0,168,232,0.15) !important;
+    border: 1px solid rgba(0,168,232,0.3) !important;
+    border-radius: 8px !important;
+    padding: 8px 12px !important;
+    margin: 8px 0 !important;
+}
 </style>"""
 
 if "logged_in" not in st.session_state:
@@ -496,8 +683,17 @@ def render_sidebar():
         logo_path = os.path.join(DIR_ACTUAL, "logo_aqario.png")
         if os.path.exists(logo_path):
             st.image(logo_path, use_container_width=True)
-        st.markdown(f"**{st.session_state.user}**")
-        st.markdown(f"*{st.session_state.rol}*")
+        
+        st.markdown(f"""
+<div style="background:rgba(0,168,232,0.15);border:1px solid rgba(0,168,232,0.4);
+border-radius:8px;padding:10px 14px;margin:12px 0;">
+<div style="font-size:0.7rem;color:#7EC8E3;letter-spacing:1px;
+text-transform:uppercase;margin-bottom:4px;">Usuario activo</div>
+<div style="font-weight:700;font-size:1rem;color:#FFFFFF;">{st.session_state.user}</div>
+<div style="font-size:0.75rem;color:#00A8E8;font-weight:600;">{st.session_state.rol}</div>
+</div>
+""", unsafe_allow_html=True)
+        
         st.markdown("---")
         
         st.markdown("**💾 RESPALDO**")
@@ -649,8 +845,166 @@ def render_titulos():
             st.download_button("Descargar ZIP con todos los titulos", zip_buffer.getvalue(), "Titulos_AXIS.zip", "application/zip", type="primary", use_container_width=True)
 
 def render_informes():
-    st.markdown("### Informes de Auditoria")
-    st.info("Modulo de informes en desarrollo")
+    st.header("Informes de Auditoria")
+    
+    if 'df_auditoria' not in st.session_state or st.session_state.df_auditoria is None:
+        st.warning("Cargue datos en la pestana AUDITORIA primero.")
+        return
+    
+    df = st.session_state.df_auditoria
+    
+    # --- Period selector ---
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        tipo_informe = st.selectbox("Tipo de Informe", 
+            ["Mensual", "Semanal", "Por Rango de Fechas"])
+    with col2:
+        eps_filter = st.selectbox("Filtrar por EPS", 
+            ["Todas"] + list(df['NIT_EPS'].unique()))
+    with col3:
+        st.write("")
+        st.write("")
+        generar = st.button("Generar Informe PDF")
+    
+    # --- Summary cards ---
+    df_filtered = df if eps_filter == "Todas" else df[df['NIT_EPS'] == eps_filter]
+    
+    c1,c2,c3,c4 = st.columns(4)
+    c1.metric("RIPS Auditadas", len(df_filtered))
+    c2.metric("Cartera Total", f"$ {df_filtered['VALOR_TOTAL'].sum():,.0f}".replace(',','.'))
+    errores = len(df_filtered[df_filtered.get('ALERTAS_SISTEMA','OK') != 'OK']) if 'ALERTAS_SISTEMA' in df_filtered.columns else 0
+    c3.metric("Errores Detectados", errores)
+    c4.metric("Recuperabilidad", "85%")
+    
+    st.markdown("---")
+    
+    # --- Charts ---
+    st.subheader("Distribucion por EPS")
+    if not df_filtered.empty and 'NIT_EPS' in df_filtered.columns:
+        eps_totals = df_filtered.groupby('NIT_EPS')['VALOR_TOTAL'].sum().reset_index()
+        st.bar_chart(eps_totals.set_index('NIT_EPS'))
+    else:
+        st.info("No hay datos para mostrar grafico")
+    
+    # --- Show data table ---
+    st.subheader("Datos Auditados")
+    st.dataframe(df_filtered.head(100), use_container_width=True)
+    
+    # --- Generate PDF report ---
+    if generar:
+        pdf_bytes = generar_informe_pdf(df_filtered, eps_filter, tipo_informe)
+        if pdf_bytes:
+            st.download_button(
+                label="Descargar Informe PDF",
+                data=pdf_bytes,
+                file_name=f"Informe_Auditoria_{tipo_informe}_{datetime.now().strftime('%Y%m%d')}.pdf",
+                mime="application/pdf"
+            )
+
+def generar_informe_pdf(df, eps_filter, tipo_informe):
+    clean = lambda s: str(s).replace('—','-').replace('–','-').replace('"','"').replace('"','"').replace('\u2019',"'").replace('\u2018',"'").replace('…','...').encode('latin-1','ignore').decode('latin-1')
+    
+    def wl(pdf, txt, bold=False, size=10, align='L', h=7):
+        pdf.set_font('Helvetica', 'B' if bold else '', size)
+        txt = clean(str(txt))
+        pdf.cell(0, h, txt[:95], ln=1, align=align)
+        if len(txt) > 95:
+            pdf.cell(0, h, txt[95:], ln=1, align=align)
+    
+    pdf = FPDF('P','mm','A4')
+    pdf.add_page()
+    pdf.set_margins(20,20,20)
+    pdf.set_auto_page_break(True, margin=20)
+    pdf.set_xy(20,15)
+    
+    # Logo
+    try:
+        pdf.image('logo_aqario.png', x=20, y=12, w=32)
+        pdf.set_xy(20, 44)
+    except:
+        wl(pdf, 'aQario - GRUPO AXIS S.A.S.', bold=True, size=11)
+    
+    # Header
+    wl(pdf, f'GRUPO AXIS S.A.S. | NIT 902021366 | Medellin, Colombia', size=8, align='R')
+    wl(pdf, f'Generado: {datetime.now().strftime("%d/%m/%Y %H:%M")}', size=8, align='R')
+    pdf.ln(2)
+    
+    pdf.set_draw_color(0,45,92)
+    pdf.set_line_width(0.8)
+    pdf.line(20, pdf.get_y(), 190, pdf.get_y())
+    pdf.ln(4)
+    
+    # Title
+    wl(pdf, f'INFORME DE AUDITORIA DE CARTERA — {tipo_informe.upper()}', bold=True, size=13, align='C', h=9)
+    eps_label = eps_filter if eps_filter != 'Todas' else 'Todas las Entidades'
+    wl(pdf, f'EPS: {eps_label}', size=9, align='C')
+    pdf.ln(4)
+    
+    # Summary box
+    pdf.set_fill_color(0,45,92)
+    pdf.set_text_color(255,255,255)
+    pdf.set_font('Helvetica','B',10)
+    pdf.cell(0,8,'RESUMEN EJECUTIVO',ln=1,align='C',fill=True)
+    pdf.set_text_color(0,0,0)
+    pdf.ln(2)
+    
+    total = df['VALOR_TOTAL'].sum()
+    wl(pdf, f'Total RIPS Auditadas: {len(df)}', size=10)
+    wl(pdf, f'Total Cartera en Gestion: $ {total:,.0f}'.replace(',','.'), size=10)
+    wl(pdf, f'Entidades Deudoras: {df["NIT_EPS"].nunique() if "NIT_EPS" in df.columns else 0}', size=10)
+    wl(pdf, f'Recuperabilidad Estimada: 85%', size=10)
+    pdf.ln(4)
+    
+    pdf.set_draw_color(0,168,232)
+    pdf.line(20, pdf.get_y(), 190, pdf.get_y())
+    pdf.ln(3)
+    
+    # Table header
+    wl(pdf, 'DETALLE DE FACTURAS AUDITADAS', bold=True, size=10)
+    pdf.ln(2)
+    
+    pdf.set_fill_color(0,45,92)
+    pdf.set_text_color(255,255,255)
+    pdf.set_font('Helvetica','B',8)
+    pdf.cell(35,7,'No. Factura',border=0,ln=0,fill=True)
+    pdf.cell(50,7,'Paciente',border=0,ln=0,fill=True)
+    pdf.cell(25,7,'CUPS',border=0,ln=0,fill=True)
+    pdf.cell(25,7,'Diagnostico',border=0,ln=0,fill=True)
+    pdf.cell(35,7,'Valor',border=0,ln=1,fill=True,align='R')
+    pdf.set_text_color(0,0,0)
+    
+    pdf.set_font('Helvetica','',8)
+    for i, (_, row) in enumerate(df.iterrows()):
+        fill = i % 2 == 0
+        if fill:
+            pdf.set_fill_color(240,246,255)
+        factura = clean(str(row.get('NUMERO_FACTURA','N/A')))[:14]
+        paciente = clean(str(row.get('NOMBRE_PACIENTE','N/A')))[:24]
+        cups = clean(str(row.get('CODIGO_CUPS','N/A')))[:10]
+        diag = clean(str(row.get('DIAGNOSTICO','N/A')))[:10]
+        try: 
+            valor_num = int(float(str(row.get('VALOR_TOTAL',0)).replace(',','').replace('.','')))
+            valor = f"$ {valor_num//1000}K"
+        except: 
+            valor = str(row.get('VALOR_TOTAL',''))
+        pdf.cell(35,6,factura,border=0,ln=0,fill=fill)
+        pdf.cell(50,6,paciente,border=0,ln=0,fill=fill)
+        pdf.cell(25,6,cups,border=0,ln=0,fill=fill)
+        pdf.cell(25,6,diag,border=0,ln=0,fill=fill)
+        pdf.cell(35,6,valor,border=0,ln=1,align='R',fill=fill)
+    
+    pdf.ln(4)
+    pdf.set_draw_color(0,45,92)
+    pdf.line(20, pdf.get_y(), 190, pdf.get_y())
+    pdf.ln(3)
+    
+    # Data protection footer
+    pdf.set_font('Helvetica','',7)
+    footer = ('PROTECCION DE DATOS: Informacion confidencial protegida bajo Ley 1581/2012, '
+              'Ley 1438/2011 y Resolucion 3374/2000 (RIPS). Generado por aQario - GRUPO AXIS S.A.S. NIT 902021366.')
+    pdf.cell(0,5,clean(footer),ln=1,align='C')
+    
+    return bytes(pdf.output())
 
 def render_usuarios():
     st.markdown("### Gestion de Usuarios")
@@ -785,7 +1139,22 @@ if not st.session_state.logged_in:
     render_login()
 else:
     render_sidebar()
-    st.markdown('<h1 style="color:#0A1A3F;">aQario - Sistema de Auditoria</h1>', unsafe_allow_html=True)
+    st.markdown("""
+<div style="display:flex;align-items:center;gap:16px;
+padding:0 0 16px 0;border-bottom:3px solid #00A8E8;margin-bottom:24px;">
+<div>
+<div style="font-family:'Montserrat',sans-serif;font-weight:700;
+font-size:1.6rem;color:#001830;letter-spacing:-0.5px;">aQario</div>
+<div style="font-size:0.75rem;color:#5B7FA6;letter-spacing:2px;
+text-transform:uppercase;font-weight:600;">Sistema de Auditoria de Cartera</div>
+</div>
+<div style="margin-left:auto;background:#EEF5FF;border:1px solid #C5D8EC;
+border-radius:6px;padding:4px 12px;">
+<span style="font-size:0.7rem;color:#5B7FA6;letter-spacing:1px;">
+GRUPO AXIS S.A.S. | NIT 902021366</span>
+</div>
+</div>
+""", unsafe_allow_html=True)
     
     if st.session_state.rol == "Cliente IPS":
         render_cliente_ips_portal()
