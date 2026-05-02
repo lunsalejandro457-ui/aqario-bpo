@@ -47,10 +47,13 @@ EMAIL_CONFIG_PATH = os.path.join(DIR_ACTUAL, "email_config.json")
 
 
 def cargar_config_email():
-    if os.path.exists(EMAIL_CONFIG_PATH):
-        import json
-        with open(EMAIL_CONFIG_PATH, "r") as f:
-            return json.load(f)
+    try:
+        if os.path.exists(EMAIL_CONFIG_PATH):
+            import json
+            with open(EMAIL_CONFIG_PATH, "r") as f:
+                return json.load(f)
+    except Exception:
+        pass
     return {"smtp_server": "smtp.gmail.com", "smtp_port": 587, "email": "", "password": "", "enabled": False}
 
 
@@ -95,15 +98,15 @@ def resolver_nombre_eps(nit):
 
 
 def cargar_usuarios():
-    if os.path.exists(USERS_PATH):
-        try:
+    try:
+        if os.path.exists(USERS_PATH):
             df = pd.read_csv(USERS_PATH)
             usuarios = {}
             for _, row in df.iterrows():
                 usuarios[row["username"]] = {"password": row["password_hash"], "rol": row["rol"], "nombre": row["nombre"], "eps_asignada": row.get("eps_asignada", None)}
             return usuarios
-        except Exception:
-            pass
+    except Exception:
+        pass
     guardar_usuarios(USUARIOS_DEFAULT.copy())
     return USUARIOS_DEFAULT.copy()
 
@@ -132,11 +135,12 @@ def eliminar_usuario(username):
 
 
 def cargar_db():
-    if os.path.exists(DB_PATH):
-        try:
+    try:
+        if os.path.exists(DB_PATH):
             return pd.read_csv(DB_PATH)
-        except Exception:
-            pass
+    except Exception as e:
+        st.info("Sin datos históricos")
+        return pd.DataFrame(columns=["ips", "eps", "no_factura", "valor", "errores", "fecha", "estado", "usuario"])
     return pd.DataFrame(columns=["ips", "eps", "no_factura", "valor", "errores", "fecha", "estado", "usuario"])
 
 
@@ -394,7 +398,10 @@ def generar_titulo_pdf(datos_factura, eps, ips, usuario):
         pdf.ln(1)
         pdf.multi_cell(0, 4, latin("Cordialmente,\nDepartamento de Recaudo y Cartera - GRUPO AXIS S.A.S."))
 
-        return pdf.output(dest="S").encode("latin-1")
+        pdf_output = pdf.output(dest="S")
+        if isinstance(pdf_output, str):
+            return pdf_output.encode("latin-1")
+        return bytes(pdf_output)
     except Exception as e:
         st.error(f"Error al generar el PDF: {str(e)}")
         return None
@@ -467,7 +474,10 @@ def generar_certificado_auditoria(df, alertas, ips_nombre, fecha_inicio, fecha_f
         pdf.set_text_color(100, 100, 100)
         pdf.multi_cell(0, 4, latin("Generado automaticamente por aQario - Grupo AXIS S.A.S."))
 
-        return pdf.output(dest="S").encode("latin-1")
+        pdf_output = pdf.output(dest="S")
+        if isinstance(pdf_output, str):
+            return pdf_output.encode("latin-1")
+        return bytes(pdf_output)
     except Exception as e:
         st.error(f"Error al generar certificado: {str(e)}")
         return None
@@ -526,7 +536,10 @@ def generar_certificado_diagnostico(df_riesgo, porcentaje, estado, ips_nombre):
         pdf.set_text_color(0, 0, 0)
         pdf.multi_cell(0, 4, latin("Nuestro equipo ejecutara las acciones necesarias para el rescate de estos fondos.\nGRUPO AXIS S.A.S. - Departamento de Recaudo y Cartera"))
 
-        return pdf.output(dest="S").encode("latin-1")
+        pdf_output = pdf.output(dest="S")
+        if isinstance(pdf_output, str):
+            return pdf_output.encode("latin-1")
+        return bytes(pdf_output)
     except Exception as e:
         st.error(f"Error al generar certificado: {str(e)}")
         return None
@@ -561,6 +574,9 @@ CUSTOM_CSS = """
     .stTabs [data-baseweb="tab-list"] button[aria-selected="true"] { background-color: #0A1A3F !important; color: #FFFFFF !important; border-color: #0A1A3F !important; }
     .stTabs [data-baseweb="tab"] span { color: #0A1A3F !important; }
     .stTabs [data-baseweb="tab-list"] button[aria-selected="true"] span { color: #FFFFFF !important; }
+    .stSelectbox [data-baseweb="select"] { color: #000000 !important; }
+    .stSelectbox [data-baseweb="select"] * { color: #000000 !important; }
+    .stSelectbox [data-baseweb="select"] > div { color: #000000 !important; }
 
     .stMetric { background-color: #FFFFFF; border-radius: 8px; padding: 1rem; }
     .stMetric label, .stMetric p, .stMetric span { color: #000000 !important; font-weight: 600 !important; }
@@ -992,7 +1008,10 @@ def generar_informe_hallazgos(df_alertas, ips_nombre, periodo, usuario):
 
         pdf.ln(3)
         pdf.multi_cell(0, 4, latin("Informe generado por sistema aQario - Grupo AXIS S.A.S."))
-        return pdf.output(dest="S").encode("latin-1")
+        pdf_output = pdf.output(dest="S")
+        if isinstance(pdf_output, str):
+            return pdf_output.encode("latin-1")
+        return bytes(pdf_output)
     except Exception as e:
         st.error(f"Error: {str(e)}")
         return None
