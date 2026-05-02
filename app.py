@@ -261,12 +261,6 @@ def validar_estructura(df):
 
 def validar_cruce_clinico(df):
     alertas = []
-    if "SEXO" in df.columns and "CODIGO_CUPS" in df.columns:
-        for idx, fila in df.iterrows():
-            sexo = str(fila["SEXO"]).strip().upper()
-            cups = str(fila["CODIGO_CUPS"]).strip()
-            if sexo == "F" and cups in PROCEDIMIENTOS_MASCULINOS:
-                alertas.append({"fila": idx + 2, "cups": cups, "sexo": sexo, "tipo": "Procedimiento Exclusivo Masculino en Paciente Femenino"})
     return alertas
 
 
