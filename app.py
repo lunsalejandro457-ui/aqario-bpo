@@ -4,6 +4,7 @@ import pandas as pd
 import numpy as np
 import re
 import os
+import json
 import hashlib
 import smtplib
 import ssl
@@ -17,39 +18,48 @@ from fpdf import FPDF
 st.set_page_config(page_title="aQario", page_icon="📊", layout="wide", initial_sidebar_state="expanded")
 
 DIR_ACTUAL = os.path.dirname(os.path.abspath(__file__))
-DB_PATH = os.path.join(DIR_ACTUAL, "db_axis_recovery.csv")
-USERS_PATH = os.path.join(DIR_ACTUAL, "db_users.csv")
 
-PERFILES = {
-    "Master": ["auditoria", "fabrica", "informes", "gestion_usuarios", "configuracion"],
-    "Gestor": ["auditoria", "fabrica", "informes"],
-    "Cliente IPS": ["dashboard_ips"],
-}
-
-USUARIOS_DEFAULT = {
-    "admin": {"password": hashlib.sha256("axis2026".encode()).hexdigest(), "rol": "Master", "nombre": "Admin AXIS", "eps_asignada": None},
-    "ips_sura": {"password": hashlib.sha256("sura2026".encode()).hexdigest(), "rol": "Cliente IPS", "nombre": "IPS SURA", "eps_asignada": "SURA"},
-    "gestor1": {"password": hashlib.sha256("gestor2026".encode()).hexdigest(), "rol": "Gestor", "nombre": "Gestor BPO", "eps_asignada": None},
-}
-
-COLUMNAS_CRITICAS = ["NUMERO_FACTURA", "VALOR_TOTAL", "NIT_EPS", "FECHA_RADICADO", "CODIGO_CUPS", "DIAGNOSTICO"]
-PROCEDIMIENTOS_MASCULINOS = ["560301", "560302", "630501", "630502", "620501", "630701", "560201"]
-
-NIT_VALORES = [800123456, 800234567, 800345678, 800456789, 900111222]
-EPS_NOMBRES = {800123456: "Nueva EPS", 800234567: "SURA EPS", 800345678: "Salud Total", 800456789: "Coomeva", 900111222: "Sanitas"}
-CUPS_VALORES = ["890308", "906206", "890310", "906212", "890510", "906306", "890102", "906404"]
-DIAGNOSTICOS = ["J06.9", "J18.9", "K29.7", "I10", "E11.9", "M54.5", "J45.9", "K21.0"]
-PACIENTES = ["Carlos Ramirez", "Maria Lopez", "Jorge Herrera", "Ana Martinez", "Luis Torres", "Patricia Gomez", "Fernando Diaz", "Sandra Ruiz"]
-MEDICOS = ["Dr. Alejandro Reyes", "Dra. Valentina Ortiz", "Dr. Miguel Angel Paredes", "Dra. Camila Duarte"]
-
-EMAIL_CONFIG_PATH = os.path.join(DIR_ACTUAL, "email_config.json")
+GSHEETS_URL = "https://docs.google.com/spreadsheets/d/1KAf0K8YQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ/edit"
 PERFIL_LEGAL_PATH = os.path.join(DIR_ACTUAL, "config_perfil.json")
+
+def obtener_conexion_gsheets():
+    try:
+        if hasattr(st, 'connection'):
+            conn = st.connection("gsheets", type=GSheetsConnection)
+            return conn
+    except Exception:
+        pass
+    return None
+
+
+def cargar_desde_gsheets():
+    try:
+        conn = obtener_conexion_gsheets()
+        if conn:
+            df_usuarios = conn.read(worksheet="Usuarios")
+            df_perfil = conn.read(worksheet="Perfil_IPS")
+            df_auditoria = conn.read(worksheet="Auditoria_Cartera")
+            return df_usuarios, df_perfil, df_auditoria
+    except Exception:
+        pass
+    return None, None, None
+
+
+def guardar_en_gsheets(hoja, data):
+    try:
+        conn = obtener_conexion_gsheets()
+        if conn:
+            if isinstance(data, pd.DataFrame):
+                conn.update(data=data, worksheet=hoja)
+            return True
+    except Exception:
+        pass
+    return False
 
 
 def cargar_perfil_legal():
     try:
         if os.path.exists(PERFIL_LEGAL_PATH):
-            import json
             with open(PERFIL_LEGAL_PATH, "r") as f:
                 return json.load(f)
     except Exception:
@@ -65,9 +75,12 @@ def cargar_perfil_legal():
 
 
 def guardar_perfil_legal(perfil):
-    import json
-    with open(PERFIL_LEGAL_PATH, "w") as f:
-        json.dump(perfil, f, indent=2)
+    try:
+        with open(PERFIL_LEGAL_PATH, "w") as f:
+            json.dump(perfil, f, indent=2)
+        guardar_en_gsheets("Perfil_IPS", pd.DataFrame([perfil]))
+    except Exception:
+        pass
 
 
 def cargar_config_email():
@@ -259,37 +272,37 @@ class TituloPDF(FPDF):
         super().__init__(*args, **kwargs)
 
     def header(self):
-        if self.logo_path and os.path.exists(self.logo_path):
-            try:
-                self.image(self.logo_path, x=10, y=8, w=33)
-                self.set_xy(48, 8)
-            except Exception:
+        try:
+            if self.logo_path and os.path.exists(self.logo_path):
+                self.image(self.logo_path, x=10, y=8, w=30)
+                self.set_xy(45, 8)
+            else:
                 self.set_xy(10, 8)
-                self.set_font("Helvetica", "B", 16)
+                self.set_font("Helvetica", "B", 14)
                 self.set_text_color(10, 26, 63)
                 self.cell(0, 10, "aQario - Gestion de Cartera", ln=1, align="L")
                 self.ln(3)
                 self.set_draw_color(10, 26, 63)
-                self.set_line_width(0.8)
+                self.set_line_width(0.5)
                 self.line(10, self.get_y(), self.w - 10, self.get_y())
-                self.ln(4)
+                self.ln(3)
                 return
-        else:
+        except Exception:
             self.set_xy(10, 8)
-        
-        self.set_font("Helvetica", "B", 16)
+
+        self.set_font("Helvetica", "B", 14)
         self.set_text_color(10, 26, 63)
         self.cell(0, 10, "NOTIFICACION FORMAL DE TITULO EJECUTIVO", ln=1, align="L")
         
         self.set_font("Helvetica", "I", 8)
         self.set_text_color(100, 100, 100)
-        self.cell(0, 5, "aQario - Grupo AXIS S.A.S. | NIT 902021366 | Medellin, Colombia", ln=1, align="L")
+        self.cell(0, 5, "aQario - GRUPO AXIS S.A.S. | NIT 902021366 | Medellin, Colombia", ln=1, align="L")
         
-        self.ln(4)
+        self.ln(3)
         self.set_draw_color(10, 26, 63)
-        self.set_line_width(0.8)
+        self.set_line_width(0.5)
         self.line(10, self.get_y(), self.w - 10, self.get_y())
-        self.ln(4)
+        self.ln(3)
 
     def footer(self):
         self.set_y(-15)
@@ -313,7 +326,7 @@ def generar_titulo_pdf(datos_factura, eps, ips, usuario):
         pdf.fecha_impresion = datetime.now().strftime("%d/%m/%Y %H:%M")
         pdf.set_auto_page_break(auto=True, margin=25)
         pdf.add_page()
-        pdf.set_margins(left=15, top=5, right=15)
+        pdf.set_margins(15, 5, 15)
 
         ahora = datetime.now().strftime("%d/%m/%Y - %H:%M:%S")
         pdf.set_font("Helvetica", "", 9)
@@ -336,69 +349,98 @@ def generar_titulo_pdf(datos_factura, eps, ips, usuario):
         pdf.line(15, pdf.get_y(), pdf.w - 15, pdf.get_y())
         pdf.ln(5)
 
-        col_w = 95
-        x_start = 15
-        label_w = 35
+        col1_x = 15
+        col2_x = 110
+        row_h = 8
 
         pdf.set_font("Helvetica", "B", 9)
         pdf.set_text_color(10, 26, 63)
-        pdf.set_x(x_start)
-        pdf.cell(label_w, 6, "No. Factura:")
+        pdf.cell(0, row_h, "No. Factura:", ln=0)
         pdf.set_font("Helvetica", "", 9)
         pdf.set_text_color(0, 0, 0)
-        pdf.cell(col_w, 6, str(datos_factura.get("NUMERO_FACTURA", "N/A")[:30]))
+        pdf.cell(0, row_h, str(datos_factura.get("NUMERO_FACTURA", "N/A"))[:40], ln=0)
+        pdf.set_font("Helvetica", "B", 9)
+        pdf.set_text_color(10, 26, 63)
+        pdf.cell(0, row_h, "CUPS:", ln=0)
+        pdf.set_font("Helvetica", "", 9)
+        pdf.set_text_color(0, 0, 0)
+        pdf.cell(0, row_h, str(datos_factura.get("CODIGO_CUPS", "N/A")), ln=1)
 
         pdf.set_font("Helvetica", "B", 9)
         pdf.set_text_color(10, 26, 63)
-        pdf.cell(label_w, 6, "CUPS:")
+        pdf.cell(0, row_h, "Fecha Radicado:", ln=0)
         pdf.set_font("Helvetica", "", 9)
         pdf.set_text_color(0, 0, 0)
-        pdf.cell(col_w, 6, str(datos_factura.get("CODIGO_CUPS", "N/A")), ln=1)
+        pdf.cell(0, row_h, str(datos_factura.get("FECHA_RADICADO", "N/A")), ln=0)
+        pdf.set_font("Helvetica", "B", 9)
+        pdf.set_text_color(10, 26, 63)
+        pdf.cell(0, row_h, "Diagnostico:", ln=0)
+        pdf.set_font("Helvetica", "", 9)
+        pdf.set_text_color(0, 0, 0)
+        pdf.cell(0, row_h, str(datos_factura.get("DIAGNOSTICO", "N/A")), ln=1)
 
         pdf.set_font("Helvetica", "B", 9)
         pdf.set_text_color(10, 26, 63)
-        pdf.set_x(x_start)
-        pdf.cell(label_w, 6, "Fecha Radicado:")
+        pdf.cell(0, row_h, "Paciente:", ln=0)
         pdf.set_font("Helvetica", "", 9)
         pdf.set_text_color(0, 0, 0)
-        pdf.cell(col_w, 6, str(datos_factura.get("FECHA_RADICADO", "N/A")))
+        pdf.cell(0, row_h, str(datos_factura.get("NOMBRE_PACIENTE", datos_factura.get("Nombre_Paciente", "N/A")))[:45], ln=0)
+        pdf.set_font("Helvetica", "B", 9)
+        pdf.set_text_color(10, 26, 63)
+        pdf.cell(0, row_h, "Profesional:", ln=0)
+        pdf.set_font("Helvetica", "", 9)
+        pdf.set_text_color(0, 0, 0)
+        pdf.cell(0, row_h, str(datos_factura.get("MEDICO_TRATANTE", datos_factura.get("Medico_Tratante", "No especificado")))[:45], ln=1)
 
         pdf.set_font("Helvetica", "B", 9)
         pdf.set_text_color(10, 26, 63)
-        pdf.cell(label_w, 6, "Diagnostico:")
+        pdf.cell(0, row_h, "Documento:", ln=0)
         pdf.set_font("Helvetica", "", 9)
         pdf.set_text_color(0, 0, 0)
-        pdf.cell(col_w, 6, str(datos_factura.get("DIAGNOSTICO", "N/A")), ln=1)
-
+        pdf.cell(0, row_h, str(datos_factura.get("DOCUMENTO", datos_factura.get("NUMERO_DOCUMENTO", datos_factura.get("TIPO_DOCUMENTO", "N/A")))[:30]), ln=0)
         pdf.set_font("Helvetica", "B", 9)
         pdf.set_text_color(10, 26, 63)
-        pdf.set_x(x_start)
-        pdf.cell(label_w, 6, "Paciente:")
+        pdf.cell(0, row_h, "Fecha Atencion:", ln=0)
         pdf.set_font("Helvetica", "", 9)
         pdf.set_text_color(0, 0, 0)
-        pdf.cell(col_w, 6, str(datos_factura.get("NOMBRE_PACIENTE", datos_factura.get("Nombre_Paciente", "N/A")))[:40])
+        pdf.cell(0, row_h, str(datos_factura.get("FECHA_ATENCION", datos_factura.get("Fecha_Atencion", "N/A"))), ln=1)
 
+        pdf.ln(8)
+        pdf.set_draw_color(10, 26, 63)
+        pdf.set_fill_color(235, 240, 255)
+        pdf.set_font("Helvetica", "B", 12)
+        pdf.set_text_color(0, 0, 0)
+        pdf.cell(0, 12, "VALOR TOTAL A COBRAR:", border=1, fill=True, ln=0)
+        valor_total = datos_factura.get("VALOR_TOTAL", 0)
+        valor_str = f"$ {int(float(valor_total)):,.0f} COP" if isinstance(valor_total, (int, float)) else str(valor_total)
+        pdf.set_font("Helvetica", "B", 14)
+        pdf.set_text_color(10, 26, 63)
+        pdf.cell(0, 12, valor_str, border=1, fill=True, align="C", ln=1)
+
+        pdf.ln(8)
+        pdf.set_font("Helvetica", "B", 10)
+        pdf.set_text_color(10, 26, 63)
+        pdf.cell(0, 8, "REQUERIMIENTO DE PAGO PRE-JURIDICO", ln=1)
+        pdf.ln(2)
+        pdf.set_font("Helvetica", "", 9)
+        pdf.set_text_color(0, 0, 0)
+        pdf.multi_cell(0, 5, f"En nuestra calidad de representantes de {ips_nombre}, le notificamos que las facturas detalladas presentan un estado de mora que afecta la liquidez de nuestro representado. {perfil.get('gestor_nombre','GRUPO AXIS S.A.S.')} ha sido facultado para el recaudo administrativo y judicial. Le instamos a realizar el pago en un plazo no mayor a 48 horas. De lo contrario, procederemos con la radicacion del titulo para un Proceso Ejecutivo, generando honorarios y costas procesales.")
+        
+        pdf.ln(3)
         pdf.set_font("Helvetica", "B", 9)
         pdf.set_text_color(10, 26, 63)
-        pdf.cell(label_w, 6, "Profesional:")
-        pdf.set_font("Helvetica", "", 9)
+        pdf.multi_cell(0, 5, f"Entidad Gestora: {perfil.get('gestor_nombre','GRUPO AXIS S.A.S.')} | NIT: {perfil.get('gestor_nit','902021366')}")
+        pdf.set_font("Helvetica", "", 8)
         pdf.set_text_color(0, 0, 0)
-        pdf.cell(col_w, 6, str(datos_factura.get("MEDICO_TRATANTE", datos_factura.get("Medico_Tratante", "No especificado")))[:40], ln=1)
+        pdf.multi_cell(0, 5, "Cordialmente,\nDepartamento de Recaudo y Cartera\nMedellin, Colombia")
 
-        pdf.set_font("Helvetica", "B", 9)
-        pdf.set_text_color(10, 26, 63)
-        pdf.set_x(x_start)
-        pdf.cell(label_w, 6, "Documento:")
-        pdf.set_font("Helvetica", "", 9)
-        pdf.set_text_color(0, 0, 0)
-        pdf.cell(col_w, 6, str(datos_factura.get("DOCUMENTO", datos_factura.get("NUMERO_DOCUMENTO", datos_factura.get("TIPO_DOCUMENTO", "N/A")))[:30]))
-
-        pdf.set_font("Helvetica", "B", 9)
-        pdf.set_text_color(10, 26, 63)
-        pdf.cell(label_w, 6, "Fecha Atencion:")
-        pdf.set_font("Helvetica", "", 9)
-        pdf.set_text_color(0, 0, 0)
-        pdf.cell(col_w, 6, str(datos_factura.get("FECHA_ATENCION", datos_factura.get("Fecha_Atencion", "N/A"))), ln=1)
+        pdf_output = pdf.output(dest="S")
+        if isinstance(pdf_output, (bytes, bytearray)):
+            return bytes(pdf_output)
+        return pdf_output.encode("latin-1") if isinstance(pdf_output, str) else pdf_output
+    except Exception as e:
+        st.error(f"Error al generar el PDF: {str(e)}")
+        return None
 
         pdf.ln(8)
         pdf.set_draw_color(10, 26, 63)
