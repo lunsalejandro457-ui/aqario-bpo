@@ -21,6 +21,14 @@ DIR_ACTUAL = os.path.dirname(os.path.abspath(__file__))
 
 GSHEETS_URL = "https://docs.google.com/spreadsheets/d/1KAf0K8YQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ/edit"
 PERFIL_LEGAL_PATH = os.path.join(DIR_ACTUAL, "config_perfil.json")
+DB_PATH = os.path.join(DIR_ACTUAL, "db_axis_recovery.csv")
+USERS_PATH = os.path.join(DIR_ACTUAL, "db_users.csv")
+
+USUARIOS_DEFAULT = {
+    "admin": {"password": hashlib.sha256("axis2026".encode()).hexdigest(), "rol": "Master", "nombre": "Admin AXIS", "eps_asignada": None},
+    "ips_sura": {"password": hashlib.sha256("sura2026".encode()).hexdigest(), "rol": "Cliente IPS", "nombre": "IPS SURA", "eps_asignada": "SURA"},
+    "gestor1": {"password": hashlib.sha256("gestor2026".encode()).hexdigest(), "rol": "Gestor", "nombre": "Gestor BPO", "eps_asignada": None},
+}
 
 def obtener_conexion_gsheets():
     try:
@@ -81,6 +89,35 @@ def guardar_perfil_legal(perfil):
         guardar_en_gsheets("Perfil_IPS", pd.DataFrame([perfil]))
     except Exception:
         pass
+
+
+def generar_respaldo_total():
+    usuarios = cargar_usuarios()
+    perfil = cargar_perfil_legal()
+    db = cargar_db()
+    
+    respaldo = {
+        "usuarios": usuarios,
+        "perfil_legal": perfil,
+        "auditoria": db.to_dict(orient="records") if not db.empty else [],
+        "fecha_respaldo": datetime.now().strftime("%d/%m/%Y %H:%M")
+    }
+    return json.dumps(respaldo, indent=2, ensure_ascii=False)
+
+
+def cargar_respaldo(json_data):
+    try:
+        data = json.loads(json_data)
+        if "usuarios" in data:
+            guardar_usuarios(data["usuarios"])
+        if "perfil_legal" in data:
+            guardar_perfil_legal(data["perfil_legal"])
+        if "auditoria" in data and data["auditoria"]:
+            for reg in data["auditoria"]:
+                guardar_db(reg)
+        return True
+    except Exception:
+        return False
 
 
 def cargar_config_email():
@@ -326,7 +363,7 @@ def generar_titulo_pdf(datos_factura, eps, ips, usuario):
         pdf.fecha_impresion = datetime.now().strftime("%d/%m/%Y %H:%M")
         pdf.set_auto_page_break(auto=True, margin=25)
         pdf.add_page()
-        pdf.set_margins(15, 5, 15)
+        pdf.set_margins(15, 15, 15)
 
         ahora = datetime.now().strftime("%d/%m/%Y - %H:%M:%S")
         pdf.set_font("Helvetica", "", 9)
@@ -346,76 +383,48 @@ def generar_titulo_pdf(datos_factura, eps, ips, usuario):
         pdf.cell(0, 7, "DATOS DEL TITULO EJECUTIVO", ln=1)
         pdf.set_draw_color(10, 26, 63)
         pdf.set_line_width(0.5)
-        pdf.line(15, pdf.get_y(), pdf.w - 15, pdf.get_y())
+        pdf.line(pdf.l_margin, pdf.get_y(), pdf.w - pdf.r_margin, pdf.get_y())
         pdf.ln(5)
 
-        col1_x = 15
-        col2_x = 110
         row_h = 8
-
+        
         pdf.set_font("Helvetica", "B", 9)
         pdf.set_text_color(10, 26, 63)
-        pdf.cell(0, row_h, "No. Factura:", ln=0)
-        pdf.set_font("Helvetica", "", 9)
-        pdf.set_text_color(0, 0, 0)
-        pdf.cell(0, row_h, str(datos_factura.get("NUMERO_FACTURA", "N/A"))[:40], ln=0)
+        pdf.multi_cell(0, row_h, f"No. Factura: {datos_factura.get('NUMERO_FACTURA', 'N/A')}", border=0)
         pdf.set_font("Helvetica", "B", 9)
         pdf.set_text_color(10, 26, 63)
-        pdf.cell(0, row_h, "CUPS:", ln=0)
-        pdf.set_font("Helvetica", "", 9)
-        pdf.set_text_color(0, 0, 0)
-        pdf.cell(0, row_h, str(datos_factura.get("CODIGO_CUPS", "N/A")), ln=1)
-
+        pdf.multi_cell(0, row_h, f"CUPS: {datos_factura.get('CODIGO_CUPS', 'N/A')}", border=0)
+        
         pdf.set_font("Helvetica", "B", 9)
         pdf.set_text_color(10, 26, 63)
-        pdf.cell(0, row_h, "Fecha Radicado:", ln=0)
-        pdf.set_font("Helvetica", "", 9)
-        pdf.set_text_color(0, 0, 0)
-        pdf.cell(0, row_h, str(datos_factura.get("FECHA_RADICADO", "N/A")), ln=0)
+        pdf.multi_cell(0, row_h, f"Fecha Radicado: {datos_factura.get('FECHA_RADICADO', 'N/A')}", border=0)
         pdf.set_font("Helvetica", "B", 9)
         pdf.set_text_color(10, 26, 63)
-        pdf.cell(0, row_h, "Diagnostico:", ln=0)
-        pdf.set_font("Helvetica", "", 9)
-        pdf.set_text_color(0, 0, 0)
-        pdf.cell(0, row_h, str(datos_factura.get("DIAGNOSTICO", "N/A")), ln=1)
-
+        pdf.multi_cell(0, row_h, f"Diagnostico: {datos_factura.get('DIAGNOSTICO', 'N/A')}", border=0)
+        
         pdf.set_font("Helvetica", "B", 9)
         pdf.set_text_color(10, 26, 63)
-        pdf.cell(0, row_h, "Paciente:", ln=0)
-        pdf.set_font("Helvetica", "", 9)
-        pdf.set_text_color(0, 0, 0)
-        pdf.cell(0, row_h, str(datos_factura.get("NOMBRE_PACIENTE", datos_factura.get("Nombre_Paciente", "N/A")))[:45], ln=0)
+        pdf.multi_cell(0, row_h, f"Paciente: {datos_factura.get('NOMBRE_PACIENTE', datos_factura.get('Nombre_Paciente', 'N/A'))}", border=0)
         pdf.set_font("Helvetica", "B", 9)
         pdf.set_text_color(10, 26, 63)
-        pdf.cell(0, row_h, "Profesional:", ln=0)
-        pdf.set_font("Helvetica", "", 9)
-        pdf.set_text_color(0, 0, 0)
-        pdf.cell(0, row_h, str(datos_factura.get("MEDICO_TRATANTE", datos_factura.get("Medico_Tratante", "No especificado")))[:45], ln=1)
-
+        pdf.multi_cell(0, row_h, f"Profesional: {datos_factura.get('MEDICO_TRATANTE', datos_factura.get('Medico_Tratante', 'No especificado'))}", border=0)
+        
         pdf.set_font("Helvetica", "B", 9)
         pdf.set_text_color(10, 26, 63)
-        pdf.cell(0, row_h, "Documento:", ln=0)
-        pdf.set_font("Helvetica", "", 9)
-        pdf.set_text_color(0, 0, 0)
-        pdf.cell(0, row_h, str(datos_factura.get("DOCUMENTO", datos_factura.get("NUMERO_DOCUMENTO", datos_factura.get("TIPO_DOCUMENTO", "N/A")))[:30]), ln=0)
+        doc = datos_factura.get("DOCUMENTO", datos_factura.get("NUMERO_DOCUMENTO", datos_factura.get("TIPO_DOCUMENTO", "N/A")))
+        pdf.multi_cell(0, row_h, f"Documento: {doc}", border=0)
         pdf.set_font("Helvetica", "B", 9)
         pdf.set_text_color(10, 26, 63)
-        pdf.cell(0, row_h, "Fecha Atencion:", ln=0)
-        pdf.set_font("Helvetica", "", 9)
-        pdf.set_text_color(0, 0, 0)
-        pdf.cell(0, row_h, str(datos_factura.get("FECHA_ATENCION", datos_factura.get("Fecha_Atencion", "N/A"))), ln=1)
+        pdf.multi_cell(0, row_h, f"Fecha Atencion: {datos_factura.get('FECHA_ATENCION', datos_factura.get('Fecha_Atencion', 'N/A'))}", border=0)
 
         pdf.ln(8)
         pdf.set_draw_color(10, 26, 63)
         pdf.set_fill_color(235, 240, 255)
         pdf.set_font("Helvetica", "B", 12)
         pdf.set_text_color(0, 0, 0)
-        pdf.cell(0, 12, "VALOR TOTAL A COBRAR:", border=1, fill=True, ln=0)
         valor_total = datos_factura.get("VALOR_TOTAL", 0)
         valor_str = f"$ {int(float(valor_total)):,.0f} COP" if isinstance(valor_total, (int, float)) else str(valor_total)
-        pdf.set_font("Helvetica", "B", 14)
-        pdf.set_text_color(10, 26, 63)
-        pdf.cell(0, 12, valor_str, border=1, fill=True, align="C", ln=1)
+        pdf.cell(0, 12, f"VALOR TOTAL A COBRAR: {valor_str}", border=1, fill=True, align="C", ln=1)
 
         pdf.ln(8)
         pdf.set_font("Helvetica", "B", 10)
@@ -826,6 +835,37 @@ def render_sidebar():
             st.session_state.df_riesgo = None
             st.session_state.alertas_detectadas = []
             st.rerun()
+        
+        st.markdown("---")
+        st.markdown("**💾 RESPALDO**")
+        
+        if st.button("📥 DESCARGAR RESPALDO TOTAL", use_container_width=True):
+            respaldo_json = generar_respaldo_total()
+            st.download_button(
+                label="📥 Descargar Respaldo (.json)",
+                data=respaldo_json,
+                file_name=f"respaldo_aqario_{datetime.now().strftime('%Y%m%d')}.json",
+                mime="application/json",
+                use_container_width=True
+            )
+        
+        uploaded_respaldo = st.file_uploader("📂 CARGAR RESPALDO", type=["json"], key="respaldo_uploader")
+        if uploaded_respaldo:
+            if st.button("🔄 RESTAURAR", use_container_width=True):
+                try:
+                    json_data = uploaded_respaldo.getvalue().decode("utf-8")
+                    ok = cargar_respaldo(json_data)
+                    if ok:
+                        st.session_state.usuarios = cargar_usuarios()
+                        st.session_state.perfil_legal = cargar_perfil_legal()
+                        st.session_state.db_cargada = cargar_db()
+                        st.success("Respaldo restaurado exitosamente!")
+                        st.rerun()
+                    else:
+                        st.error("Error al restaurar respaldo.")
+                except Exception as e:
+                    st.error(f"Error: {e}")
+        
         st.markdown('</div>', unsafe_allow_html=True)
 
 
