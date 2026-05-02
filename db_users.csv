@@ -1,0 +1,4 @@
+username,password_hash,rol,nombre,eps_asignada
+admin,5f8facb268645154eaa1d079e3824bc7b16cf344024bb936b870d266fbd327aa,Master,Admin AXIS,
+ips_sura,212e6878da18d3a36712c42e3ff786a6d37f6c8eb8927b7eaa7f6e789654ee2f,Cliente IPS,IPS SURA,SURA
+gestor1,9c84243d972fb58f40b1b7156707330f979d1ee7c22d65a33f0c41482ec69169,Gestor,Gestor BPO,
