@@ -1,2 +1,14 @@
-fecha,usuario,accion,factura,eps,valor,estado
-02/05/2026 12:43,admin,Consolidado PDF,6 facturas,800088702-2 SURA,16505000,Generado
+fecha,usuario,accion,factura,eps,valor,estado,ips,no_factura,errores
+02/05/2026 12:43,admin,Consolidado PDF,6 facturas,800088702-2 SURA,16505000,Generado,,,
+02/05/2026 13:51,admin,,,800088702-2 SURA,85000,Titulo Generado,Todas las IPS,FE-10031,0.0
+02/05/2026 13:52,admin,,,800088702-2 SURA,85000,Titulo Generado,Todas las IPS,FE-10031,0.0
+02/05/2026 13:52,admin,,,800088702-2 SURA,85000,Titulo Generado,Todas las IPS,FE-10031,0.0
+02/05/2026 13:57,admin,,,800088702-2 SURA,85000,Titulo Generado,Todas las IPS,FE-10031,0.0
+02/05/2026 13:57,admin,,,EPS NIT 800088702-2 SURA,85000,Consolidado,Todas las IPS,FE-10031,0.0
+02/05/2026 13:57,admin,,,EPS NIT 800088702-2 SURA,2800000,Consolidado,Todas las IPS,FE-10034,0.0
+02/05/2026 13:58,admin,,,800088702-2 SURA,85000,Titulo Generado,Todas las IPS,FE-10031,0.0
+02/05/2026 13:58,admin,,,800088702-2 SURA,85000,Titulo Generado,Todas las IPS,FE-10031,0.0
+02/05/2026 13:58,admin,,,EPS NIT 800088702-2 SURA,85000,Consolidado,Todas las IPS,FE-10031,0.0
+02/05/2026 13:59,admin,,,800088702-2 SURA,85000,Titulo Generado,Todas las IPS,FE-10031,0.0
+02/05/2026 13:59,admin,,,800088702-2 SURA,85000,Titulo Generado,Todas las IPS,FE-10031,0.0
+02/05/2026 13:59,admin,,,800088702-2 SURA,85000,Titulo Generado,Todas las IPS,FE-10031,0

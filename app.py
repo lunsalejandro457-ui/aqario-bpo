@@ -277,21 +277,33 @@ class TituloPDF(FPDF):
         if self.logo_path:
             try:
                 if os.path.exists(self.logo_path):
-                    self.image(self.logo_path, x=25, y=15, w=35)
+                    self.image(self.logo_path, x=10, y=8, w=22)
             except Exception:
                 pass
-        self.set_xy(25, 52)
-        self.set_font("Helvetica", "I", 7)
-        self.set_text_color(28, 61, 115)
-        self.cell(0, 5, latin("aQario: Software de Gestion de Cartera de Grupo AXIS S.A.S. - NIT 902021366"), ln=1, align="L")
-        self.ln(10)
+        self.set_xy(35, 8)
+        self.set_font("Helvetica", "B", 9)
+        self.set_text_color(10, 26, 63)
+        self.cell(0, 4, latin("TITULO EJECUTIVO - COBRO PREJURIDICO"), ln=1, align="L")
+        self.set_xy(35, 12)
+        self.set_font("Helvetica", "I", 6)
+        self.set_text_color(100, 100, 100)
+        self.cell(0, 3, latin("aQario - Grupo AXIS S.A.S. NIT 902021366"), ln=1, align="L")
+        self.ln(3)
+        self.set_draw_color(92, 160, 242)
+        self.set_line_width(0.5)
+        self.line(10, self.get_y(), self.w - 10, self.get_y())
+        self.ln(2)
 
     def footer(self):
-        self.set_y(-35)
-        self.set_font("Helvetica", "I", 8)
+        self.set_y(-22)
+        self.set_draw_color(92, 160, 242)
+        self.set_line_width(0.3)
+        self.line(10, self.get_y(), self.w - 10, self.get_y())
+        self.ln(2)
+        self.set_font("Helvetica", "I", 6)
         self.set_text_color(0, 0, 0)
-        self.cell(0, 6, latin("Documento generado por: " + self.usuario_impresion), ln=1, align="C")
-        self.cell(0, 6, latin("aQario es un software creado por grupo axis sas 902021366"), ln=1, align="C")
+        self.cell(0, 4, latin("Generado por: " + self.usuario_impresion + " | " + self.fecha_impresion), ln=1, align="C")
+        self.cell(0, 4, latin("GRUPO AXIS S.A.S. - NIT 902021366 - Documento valido como titulo valor"), ln=1, align="C")
 
 
 def generar_titulo_pdf(datos_factura, eps, ips, usuario):
@@ -299,63 +311,89 @@ def generar_titulo_pdf(datos_factura, eps, ips, usuario):
         logo_path = os.path.join(DIR_ACTUAL, "logo_aqario.png")
         if not os.path.exists(logo_path):
             logo_path = None
-        pdf = TituloPDF(format="Letter", logo_path=logo_path)
+        pdf = TituloPDF(format="Letter", orientation="P", unit="mm")
         pdf.usuario_impresion = latin(usuario)
-        pdf.set_auto_page_break(auto=True, margin=45)
+        pdf.fecha_impresion = latin(datetime.now().strftime("%d/%m/%Y %H:%M"))
+        pdf.set_auto_page_break(auto=True, margin=25)
         pdf.add_page()
-        pdf.set_margins(left=25, top=65, right=25)
+        pdf.set_margins(left=15, top=5, right=15)
 
-        asunto = latin(f"Cobro Prejuridico - Factura {datos_factura.get('NUMERO_FACTURA', 'N/A')}")
         ahora = latin(datetime.now().strftime("%d/%m/%Y - %H:%M:%S"))
-
-        pdf.set_font("Helvetica", "", 10)
+        pdf.set_font("Helvetica", "", 8)
         pdf.set_text_color(0, 0, 0)
-        pdf.cell(0, 6, f"Fecha de impresion: {ahora}", ln=1, align="R")
-        pdf.ln(8)
-
-        pdf.set_font("Helvetica", "B", 11)
-        pdf.set_text_color(10, 26, 63)
-        if asunto.strip():
-            pdf.cell(0, 7, asunto, ln=1, align="L")
-        pdf.ln(6)
-
-        pdf.set_draw_color(92, 160, 242)
-        pdf.line(pdf.l_margin, pdf.get_y(), pdf.w - pdf.r_margin, pdf.get_y())
-        pdf.ln(6)
-
-        pdf.set_font("Helvetica", "", 10)
-        pdf.set_text_color(0, 0, 0)
-        pdf.multi_cell(0, 6, latin(f"Señores:\n{ips}\n\nReferencia: Notificacion de cobro prejudicial por concepto de servicios de salud prestados."))
-        pdf.ln(6)
-        pdf.multi_cell(0, 6, latin(f"La entidad beneficiaria {ips}, actuando bajo el respectivo Contrato de Mandato con GRUPO AXIS S.A.S., EXIGE formalmente el pago de las obligaciones economicas derivadas de la prestacion de servicios de salud. El incumplimiento facultara al acreedor para iniciar acciones judiciales mediante proceso ejecutivo."))
-        pdf.ln(8)
-
-        pdf.set_font("Helvetica", "B", 10)
-        pdf.set_text_color(10, 26, 63)
-        pdf.cell(0, 7, latin("Detalle del Titulo Ejecutivo"), ln=1)
+        pdf.cell(0, 4, latin(f"Bogota D.C., {ahora}"), ln=1, align="R")
         pdf.ln(2)
 
+        pdf.set_font("Helvetica", "B", 9)
+        pdf.set_text_color(10, 26, 63)
+        pdf.cell(0, 5, latin(f"Cobro Prejuridico - Factura {datos_factura.get('NUMERO_FACTURA', 'N/A')}"), ln=1)
+        pdf.ln(1)
+
+        pdf.set_font("Helvetica", "", 8)
+        pdf.set_text_color(0, 0, 0)
+        eps_nombre = resolver_nombre_eps(eps)
+        pdf.multi_cell(0, 4, latin(f"Señores: {eps_nombre} (NIT {eps})\nReferencia: Notificacion de cobro prejudicial por servicios de salud prestados."))
+        pdf.ln(1)
+
+        pdf.set_font("Helvetica", "B", 8)
+        pdf.set_text_color(10, 26, 63)
+        pdf.cell(0, 5, latin("DATOS DEL TITULO EJECUTIVO"), ln=1)
+        pdf.set_draw_color(92, 160, 242)
+        pdf.set_line_width(0.3)
+        pdf.line(15, pdf.get_y(), pdf.w - 15, pdf.get_y())
+        pdf.ln(1)
+
+        y_start = pdf.get_y()
+        col_izq = 15
+        col_centro = 70
+        col_der = 130
+        ancho_valor = 55
+
+        datos_tabla = [
+            ("No. Factura:", str(datos_factura.get("NUMERO_FACTURA", "N/A")), "EPS:", latin(eps_nombre)),
+            ("Fecha Radicado:", latin(str(datos_factura.get("FECHA_RADICADO", "N/A"))), "CUPS:", latin(str(datos_factura.get("CODIGO_CUPS", "N/A")))),
+            ("Diagnostico:", latin(str(datos_factura.get("DIAGNOSTICO", "N/A"))), "Ciudad:", latin(str(datos_factura.get("CIUDAD", "N/A")))),
+            ("Paciente:", latin(str(datos_factura.get("NOMBRE_PACIENTE", datos_factura.get("Nombre_Paciente", "N/A")))), "Documento:", latin(str(datos_factura.get("DOCUMENTO", datos_factura.get("TIPO_DOCUMENTO", datos_factura.get("NUMERO_DOCUMENTO", "N/A")))))),
+            ("Fecha Atencion:", latin(str(datos_factura.get("FECHA_ATENCION", datos_factura.get("Fecha_Atencion", "N/A")))), "Profesional:", latin(str(datos_factura.get("MEDICO_TRATANTE", datos_factura.get("Medico_Tratante", "No especificado"))))),
+        ]
+
+        pdf.set_font("Helvetica", "B", 7)
+        pdf.set_text_color(0, 0, 0)
+        for etiqueta, valor, etiqueta2, valor2 in datos_tabla:
+            if pdf.get_y() > 230:
+                pdf.add_page()
+                y_start = pdf.get_y()
+            pdf.set_xy(col_izq, pdf.get_y())
+            pdf.cell(18, 4, latin(etiqueta))
+            pdf.set_xy(col_izq + 18, pdf.get_y())
+            pdf.set_font("Helvetica", "", 7)
+            pdf.cell(50, 4, valor[:35])
+            pdf.set_font("Helvetica", "B", 7)
+            pdf.set_xy(col_centro, pdf.get_y())
+            pdf.cell(18, 4, latin(etiqueta2))
+            pdf.set_font("Helvetica", "", 7)
+            pdf.cell(ancho_valor, 4, valor2[:40], ln=1)
+
+        pdf.ln(2)
+        pdf.set_draw_color(92, 160, 242)
+        pdf.set_fill_color(243, 244, 246)
         valor_total = datos_factura.get("VALOR_TOTAL", 0)
         valor_str = latin(f"$ {int(valor_total):,.0f} COP") if isinstance(valor_total, (int, float)) else latin(str(valor_total))
-        detalles = [
-            (latin("Numero de Factura:"), latin(str(datos_factura.get("NUMERO_FACTURA", "N/A")))),
-            (latin("Fecha de Radicado:"), latin(str(datos_factura.get("FECHA_RADICADO", "N/A")))),
-            (latin("Codigo CUPS:"), latin(str(datos_factura.get("CODIGO_CUPS", "N/A")))),
-            (latin("Diagnostico:"), latin(str(datos_factura.get("DIAGNOSTICO", "N/A")))),
-            (latin("NIT EPS:"), latin(str(eps))),
-            (latin("Valor Total:"), valor_str),
-        ]
-        for etiqueta, valor in detalles:
-            pdf.set_font("Helvetica", "B", 10)
-            pdf.cell(0, 7, etiqueta, ln=1)
-            pdf.set_x(pdf.l_margin + 5)
-            pdf.set_font("Helvetica", "", 10)
-            pdf.set_text_color(0, 0, 0)
-            pdf.cell(0, 7, valor, ln=1)
-            pdf.ln(1)
+        pdf.set_font("Helvetica", "B", 10)
+        pdf.set_text_color(0, 0, 0)
+        pdf.set_xy(col_izq, pdf.get_y())
+        pdf.cell(55, 8, latin("VALOR TOTAL A COBRAR:"), border=1, fill=True)
+        pdf.set_font("Helvetica", "B", 11)
+        pdf.set_xy(col_izq + 55, pdf.get_y())
+        pdf.cell(120, 8, valor_str, border=1, align="C", ln=1)
 
-        pdf.ln(10)
-        pdf.multi_cell(0, 6, latin("Cordialmente,\nDepartamento de Recaudo y Cartera\nGRUPO AXIS S.A.S."))
+        pdf.ln(2)
+        pdf.set_font("Helvetica", "", 7)
+        pdf.set_text_color(0, 0, 0)
+        pdf.multi_cell(0, 4, latin(f"La entidad beneficiaria {ips}, actuando bajo el Contrato de Mandato con GRUPO AXIS S.A.S., EXIGE el pago de esta obligacion economica. El incumplimiento facultara al acreedor para iniciar acciones judiciales mediante proceso ejecutivo."))
+        pdf.ln(1)
+        pdf.multi_cell(0, 4, latin("Cordialmente,\nDepartamento de Recaudo y Cartera - GRUPO AXIS S.A.S."))
+
         return pdf.output(dest="S").encode("latin-1")
     except Exception as e:
         st.error(f"Error al generar el PDF: {str(e)}")
@@ -369,73 +407,65 @@ def generar_certificado_auditoria(df, alertas, ips_nombre, fecha_inicio, fecha_f
             logo_path = None
         pdf = TituloPDF(format="Letter", logo_path=logo_path)
         pdf.usuario_impresion = "Sistema aQario"
-        pdf.set_auto_page_break(auto=True, margin=45)
+        pdf.fecha_impresion = latin(datetime.now().strftime("%d/%m/%Y"))
+        pdf.set_auto_page_break(auto=True, margin=25)
         pdf.add_page()
-        pdf.set_margins(left=25, top=65, right=25)
+        pdf.set_margins(left=15, top=5, right=15)
 
         total_facturas = len(df)
         total_valor = f"$ {df['VALOR_TOTAL'].sum():,.0f} COP" if "VALOR_TOTAL" in df.columns else "N/A"
         total_errores = len(alertas)
         ahora = latin(datetime.now().strftime("%d/%m/%Y - %H:%M:%S"))
 
-        pdf.set_font("Helvetica", "", 10)
+        pdf.set_font("Helvetica", "", 8)
         pdf.set_text_color(0, 0, 0)
-        pdf.cell(0, 6, f"Fecha de expedicion: {ahora}", ln=1, align="R")
-        pdf.ln(8)
-
-        pdf.set_font("Helvetica", "B", 13)
-        pdf.set_text_color(10, 26, 63)
-        pdf.cell(0, 10, latin("CERTIFICADO DE AUDITORIA CONSOLIDADO"), ln=1, align="C")
-        pdf.ln(4)
-
-        pdf.set_draw_color(92, 160, 242)
-        pdf.line(pdf.l_margin, pdf.get_y(), pdf.w - pdf.r_margin, pdf.get_y())
-        pdf.ln(8)
-
-        pdf.set_font("Helvetica", "", 10)
-        pdf.set_text_color(0, 0, 0)
-        certificacion = latin(
-            f"GRUPO AXIS S.A.S. certifica que entre el {fecha_inicio} y el {fecha_fin} "
-            f"se auditaron {total_facturas} facturas de la {ips_nombre}."
-        )
-        pdf.multi_cell(0, 6, certificacion)
-        pdf.ln(4)
-        pdf.multi_cell(0, 6, latin(f"Valor total auditado: {total_valor}"))
-        pdf.ln(6)
+        pdf.cell(0, 4, f"Fecha: {ahora}", ln=1, align="R")
+        pdf.ln(1)
 
         pdf.set_font("Helvetica", "B", 10)
         pdf.set_text_color(10, 26, 63)
-        pdf.cell(0, 7, latin("Hallazgos de Auditoria"), ln=1)
+        pdf.cell(0, 7, latin("CERTIFICADO DE AUDITORIA CONSOLIDADO"), ln=1, align="C")
         pdf.ln(2)
 
-        pdf.set_font("Helvetica", "", 10)
+        pdf.set_font("Helvetica", "", 8)
+        pdf.set_text_color(0, 0, 0)
+        certificacion = latin(f"GRUPO AXIS S.A.S. certifica que entre el {fecha_inicio} y el {fecha_fin} se auditaron {total_facturas} facturas de la {ips_nombre}.")
+        pdf.multi_cell(0, 4, certificacion)
+        pdf.multi_cell(0, 4, latin(f"Valor total auditado: {total_valor}"))
+        pdf.ln(2)
+
+        pdf.set_font("Helvetica", "B", 8)
+        pdf.set_text_color(10, 26, 63)
+        pdf.cell(0, 5, latin("Hallazgos de Auditoria"), ln=1)
+        pdf.ln(1)
+
+        pdf.set_font("Helvetica", "", 8)
         pdf.set_text_color(0, 0, 0)
         if total_errores > 0:
-            pdf.multi_cell(0, 6, latin(f"Se detectaron {total_errores} errores en codigos CUPS y validacion clinica:"))
-            pdf.ln(2)
+            pdf.multi_cell(0, 4, latin(f"Se detectaron {total_errores} errores en codigos CUPS y validacion clinica:"))
+            pdf.ln(1)
             for a in alertas[:20]:
-                pdf.cell(0, 6, latin(f" - Fila {a['fila']}: {a['tipo']} (CUPS: {a['cups']})"), ln=1)
+                pdf.cell(0, 4, latin(f" - Fila {a['fila']}: {a['tipo']} (CUPS: {a['cups']})"), ln=1)
         else:
-            pdf.multi_cell(0, 6, latin("Auditoria exitosa: 0 errores encontrados. Todos los datos cumplen los estandares de calidad."))
-        pdf.ln(6)
+            pdf.multi_cell(0, 4, latin("Auditoria exitosa: 0 errores encontrados. Todos los datos cumplen los estandares de calidad."))
+        pdf.ln(3)
 
         pdf.set_draw_color(92, 160, 242)
-        pdf.set_line_width(1)
-        pdf.rect(pdf.l_margin + 10, pdf.get_y(), pdf.w - pdf.r_margin - pdf.l_margin - 20, 15)
-        pdf.set_font("Helvetica", "B", 11)
-        pdf.set_text_color(10, 26, 63)
-        y_pos = pdf.get_y() + 4
-        pdf.set_xy(pdf.l_margin + 15, y_pos)
-        pdf.cell(0, 7, latin("TITULO EJECUTIVO GENERADO"), ln=1, align="C")
-        pdf.set_xy(pdf.l_margin + 15, pdf.get_y())
-        pdf.set_font("Helvetica", "", 9)
+        pdf.set_line_width(0.8)
+        pdf.rect(pdf.l_margin + 5, pdf.get_y(), pdf.w - pdf.r_margin - pdf.l_margin - 10, 12)
+        pdf.set_font("Helvetica", "B", 9)
         pdf.set_text_color(0, 0, 0)
-        pdf.cell(0, 5, latin("Las facturas aprobadas cuentan con soporte legal para cobro prejuridico"), ln=1, align="C")
+        y_pos = pdf.get_y() + 3
+        pdf.set_xy(pdf.l_margin + 10, y_pos)
+        pdf.cell(0, 5, latin("TITULO EJECUTIVO GENERADO"), ln=1, align="C")
+        pdf.set_xy(pdf.l_margin + 10, pdf.get_y())
+        pdf.set_font("Helvetica", "", 7)
+        pdf.cell(0, 4, latin("Las facturas aprobadas cuentan con soporte legal para cobro prejuridico"), ln=1, align="C")
 
-        pdf.ln(14)
-        pdf.set_font("Helvetica", "I", 9)
+        pdf.ln(6)
+        pdf.set_font("Helvetica", "I", 7)
         pdf.set_text_color(100, 100, 100)
-        pdf.multi_cell(0, 5, latin("Este certificado fue generado automaticamente por el sistema aQario de Grupo AXIS S.A.S.\nDocumento valido como constancia de auditoria de cartera."))
+        pdf.multi_cell(0, 4, latin("Generado automaticamente por aQario - Grupo AXIS S.A.S."))
 
         return pdf.output(dest="S").encode("latin-1")
     except Exception as e:
@@ -450,60 +480,51 @@ def generar_certificado_diagnostico(df_riesgo, porcentaje, estado, ips_nombre):
             logo_path = None
         pdf = TituloPDF(format="Letter", logo_path=logo_path)
         pdf.usuario_impresion = "Sistema aQario"
-        pdf.set_auto_page_break(auto=True, margin=45)
+        pdf.fecha_impresion = latin(datetime.now().strftime("%d/%m/%Y"))
+        pdf.set_auto_page_break(auto=True, margin=25)
         pdf.add_page()
-        pdf.set_margins(left=25, top=65, right=25)
+        pdf.set_margins(left=15, top=5, right=15)
 
         ahora = latin(datetime.now().strftime("%d/%m/%Y - %H:%M:%S"))
         total_cartera = df_riesgo["valor"].sum() if not df_riesgo.empty else 0
 
-        pdf.set_font("Helvetica", "", 10)
+        pdf.set_font("Helvetica", "", 8)
         pdf.set_text_color(0, 0, 0)
-        pdf.cell(0, 6, f"Fecha de expedicion: {ahora}", ln=1, align="R")
-        pdf.ln(8)
-
-        pdf.set_font("Helvetica", "B", 13)
-        pdf.set_text_color(10, 26, 63)
-        pdf.cell(0, 10, latin("CERTIFICADO DE ESTADO DE CARTERA"), ln=1, align="C")
-        pdf.ln(4)
-
-        pdf.set_draw_color(92, 160, 242)
-        pdf.line(pdf.l_margin, pdf.get_y(), pdf.w - pdf.r_margin, pdf.get_y())
-        pdf.ln(8)
-
-        pdf.set_font("Helvetica", "", 10)
-        pdf.set_text_color(0, 0, 0)
-        certificacion = latin(
-            f"Bajo el diagnostico tecnico de AXIS BPO, la cartera de {ips_nombre} tiene un "
-            f"potencial de recuperacion del {porcentaje:.1f}%. El estado promedio es {estado}."
-        )
-        pdf.multi_cell(0, 6, certificacion)
-        pdf.ln(6)
-
-        pdf.multi_cell(0, 6, latin(f"Cartera total analizada: $ {total_cartera:,.0f} COP"))
-        pdf.multi_cell(0, 6, latin(f"Facturas analizadas: {len(df_riesgo)}"))
-        pdf.ln(6)
+        pdf.cell(0, 4, f"Fecha: {ahora}", ln=1, align="R")
+        pdf.ln(1)
 
         pdf.set_font("Helvetica", "B", 10)
         pdf.set_text_color(10, 26, 63)
-        pdf.cell(0, 7, latin("Clasificacion de Riesgo"), ln=1)
+        pdf.cell(0, 7, latin("CERTIFICADO DE ESTADO DE CARTERA"), ln=1, align="C")
         pdf.ln(2)
 
-        pdf.set_font("Helvetica", "", 10)
+        pdf.set_font("Helvetica", "", 8)
+        pdf.set_text_color(0, 0, 0)
+        certificacion = latin(f"Bajo el diagnostico tecnico de AXIS BPO, la cartera de {ips_nombre} tiene un potencial de recuperacion del {porcentaje:.1f}%. Estado promedio: {estado}.")
+        pdf.multi_cell(0, 4, certificacion)
+        pdf.multi_cell(0, 4, latin(f"Cartera total: $ {total_cartera:,.0f} COP | Facturas: {len(df_riesgo)}"))
+        pdf.ln(2)
+
+        pdf.set_font("Helvetica", "B", 8)
+        pdf.set_text_color(10, 26, 63)
+        pdf.cell(0, 5, latin("Clasificacion de Riesgo"), ln=1)
+        pdf.ln(1)
+
+        pdf.set_font("Helvetica", "", 8)
         pdf.set_text_color(0, 0, 0)
         for riesgo, icono in [("Recuperable", "Verde (Bajo Riesgo)"), ("Arriesgado", "Amarillo (Riesgo Medio)"), ("Perdida Total", "Rojo (Riesgo Alto)")]:
             count = len(df_riesgo[df_riesgo["riesgo"] == riesgo]) if not df_riesgo.empty else 0
             val = df_riesgo[df_riesgo["riesgo"] == riesgo]["valor"].sum() if not df_riesgo.empty else 0
-            pdf.cell(0, 6, latin(f"{icono} - {riesgo}: {count} facturas ($ {val:,.0f})"), ln=1)
-        pdf.ln(8)
+            pdf.cell(0, 4, latin(f"{icono} - {riesgo}: {count} facturas ($ {val:,.0f})"), ln=1)
+        pdf.ln(3)
 
         pdf.set_draw_color(92, 160, 242)
         pdf.set_line_width(0.8)
-        pdf.rect(pdf.l_margin + 10, pdf.get_y(), pdf.w - pdf.r_margin - pdf.l_margin - 20, 18)
-        pdf.set_xy(pdf.l_margin + 15, pdf.get_y() + 4)
-        pdf.set_font("Helvetica", "", 9)
+        pdf.rect(pdf.l_margin + 5, pdf.get_y(), pdf.w - pdf.r_margin - pdf.l_margin - 10, 12)
+        pdf.set_xy(pdf.l_margin + 10, pdf.get_y() + 3)
+        pdf.set_font("Helvetica", "", 7)
         pdf.set_text_color(0, 0, 0)
-        pdf.multi_cell(0, 5, latin("Nuestro equipo de gestion humana ejecutara las acciones necesarias para el rescate de estos fondos.\nGRUPO AXIS S.A.S. - Departamento de Recaudo y Cartera"))
+        pdf.multi_cell(0, 4, latin("Nuestro equipo ejecutara las acciones necesarias para el rescate de estos fondos.\nGRUPO AXIS S.A.S. - Departamento de Recaudo y Cartera"))
 
         return pdf.output(dest="S").encode("latin-1")
     except Exception as e:
@@ -519,16 +540,16 @@ CUSTOM_CSS = """
     .stApp { background-color: #FFFFFF !important; }
 
     .main-header { color: #0A1A3F; font-size: 2.5rem; font-weight: 700; letter-spacing: -0.5px; margin-bottom: 0.25rem; }
-    .main-subheader { color: #5CA0F2; font-size: 1rem; font-weight: 500; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 1.5rem; }
-    .description-text { color: #1C3D73; font-size: 0.95rem; line-height: 1.7; max-width: 720px; }
+    .main-subheader { color: #0A1A3F; font-size: 1rem; font-weight: 600; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 1.5rem; }
+    .description-text { color: #0A1A3F; font-size: 0.95rem; line-height: 1.7; max-width: 720px; font-weight: 500; }
 
     .section-title { color: #0A1A3F; font-size: 1.25rem; font-weight: 600; margin-top: 2rem; margin-bottom: 1rem; padding-bottom: 0.5rem; border-bottom: 2px solid #5CA0F2; }
 
     .upload-container { background-color: #FFFFFF; border: 1px solid #E5E7EB; border-radius: 12px; padding: 2rem; box-shadow: 0 1px 3px rgba(10, 26, 63, 0.08); }
 
-    .action-button-container { background-color: #F9FAFB; border: 1px solid #E5E7EB; border-radius: 12px; padding: 1.5rem; text-align: center; box-shadow: 0 2px 8px rgba(10, 26, 63, 0.06); }
+    .action-button-container { background-color: #F3F4F6; border: 1px solid #E5E7EB; border-radius: 12px; padding: 1.5rem; text-align: center; box-shadow: 0 2px 8px rgba(10, 26, 63, 0.06); }
 
-    .footer { margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid #E5E7EB; color: #9CA3AF; font-size: 0.8rem; text-align: center; }
+    .footer { margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid #E5E7EB; color: #0A1A3F !important; font-size: 0.8rem; text-align: center; font-weight: 500; }
     hr.divider { border: none; height: 1px; background: linear-gradient(to right, transparent, #5CA0F2, transparent); margin: 2rem 0; }
 
     .risk-green { background-color: #ECFDF5; border-left: 4px solid #10B981; padding: 12px 16px; border-radius: 8px; margin: 8px 0; }
@@ -542,9 +563,15 @@ CUSTOM_CSS = """
     .stTabs [data-baseweb="tab-list"] button[aria-selected="true"] span { color: #FFFFFF !important; }
 
     .stMetric { background-color: #FFFFFF; border-radius: 8px; padding: 1rem; }
+    .stMetric label, .stMetric p, .stMetric span { color: #000000 !important; font-weight: 600 !important; }
 
     div[data-testid="stExpander"] { background-color: transparent; }
-    [data-testid="stExpander"] .streamlit-expanderHeader { background-color: #FFFFFF; border: 1px solid #E5E7EB; border-radius: 8px; color: #0A1A3F !important; font-weight: 600; }
+    [data-testid="stExpander"] .streamlit-expanderHeader { background-color: #FFFFFF; border: 1px solid #E5E7EB; border-radius: 8px; color: #0A1A3F !important; font-weight: 600 !important; }
+
+    p, label, span, div, h1, h2, h3, h4, h5, h6, li, td, th { color: #0A1A3F !important; }
+    .stMarkdown p, .stMarkdown span { color: #0A1A3F !important; }
+    [data-testid="stMetricValue"] { color: #000000 !important; }
+    [data-testid="stMetricLabel"] { color: #0A1A3F !important; }
 </style>
 """
 
@@ -557,10 +584,10 @@ st.markdown('''
         color: #FFFFFF !important; font-weight: 600 !important;
     }
     .stMain p, .stMain label, .stMain h1, .stMain h2, .stMain h3, .stMain span { color: #0A1A3F !important; }
-    input { color: #000000 !important; }
+    input { color: #000000 !important; font-weight: 500 !important; }
     [data-testid="stSidebar"] img { margin-top: -20px; margin-bottom: 20px; }
-    div[data-testid="stMarkdownContainer"] p, label, span { color: #0A1A3F !important; font-weight: bold !important; }
-    .stError, .stWarning, .stInfo, .stSuccess { color: #0A1A3F !important; }
+    div[data-testid="stMarkdownContainer"] p, label, span { color: #0A1A3F !important; font-weight: 600 !important; }
+    .stError, .stWarning, .stInfo, .stSuccess { color: #0A1A3F !important; font-weight: 600 !important; }
     div[data-testid="stAlert"] { color: #0A1A3F !important; }
     button[kind="primary"] {
         background-color: #1C3D73 !important; color: #FFFFFF !important; border-radius: 10px !important;
@@ -571,8 +598,9 @@ st.markdown('''
         box-shadow: 0 4px 12px rgba(10, 26, 63, 0.3) !important;
     }
     th { background-color: #0A1A3F !important; color: #FFFFFF !important; }
-    td { color: #0A1A3F !important; }
+    td { color: #0A1A3F !important; font-weight: 500 !important; }
     .dataframe { border: 1px solid #E5E7EB !important; }
+    [data-testid="stCaption"] { color: #0A1A3F !important; }
 </style>
 ''', unsafe_allow_html=True)
 
@@ -618,7 +646,7 @@ def render_login():
             st.image(logo_login, width=160)
         else:
             st.markdown('<div style="text-align:center; font-size:2.5rem; font-weight:700; color:#0A1A3F; margin-bottom:1rem;">aQario</div>', unsafe_allow_html=True)
-        st.markdown('<p style="text-align:center; color:#5CA0F2; font-size:0.75rem; font-weight:600; letter-spacing:2px; text-transform:uppercase; margin-top:-0.75rem; margin-bottom:2rem;">Sistema de Auditoria y Recuperacion de Cartera</p>', unsafe_allow_html=True)
+        st.markdown('<p style="text-align:center; color:#0A1A3F; font-size:0.8rem; font-weight:600; letter-spacing:2px; text-transform:uppercase; margin-top:-0.75rem; margin-bottom:2rem;">Sistema de Auditoria y Recuperacion de Cartera</p>', unsafe_allow_html=True)
         with st.form("login_form"):
             username = st.text_input("Usuario", placeholder="Ingrese su usuario")
             password = st.text_input("Contraseña", type="password", placeholder="Ingrese su contraseña")
@@ -778,6 +806,8 @@ def render_auditoria_tab():
             pdf_bytes = generar_certificado_diagnostico(df_riesgo, porcentaje, estado, st.session_state.ips_seleccionada)
             if pdf_bytes:
                 st.download_button(label="Descargar Certificado PDF", data=pdf_bytes, file_name="Certificado_Estado_Cartera.pdf", mime="application/pdf", type="primary", use_container_width=True)
+                del pdf_bytes
+                import gc; gc.collect()
 
         st.markdown('<p class="section-title">Certificado de Auditoria Consolidado</p>', unsafe_allow_html=True)
         col_cert1, col_cert2 = st.columns(2)
@@ -791,6 +821,8 @@ def render_auditoria_tab():
                 for _, fila in df.iterrows():
                     guardar_db({"ips": st.session_state.ips_seleccionada, "eps": str(fila.get("NIT_EPS", "")), "no_factura": str(fila.get("NUMERO_FACTURA", "")), "valor": str(fila.get("VALOR_TOTAL", 0)), "errores": str(len(alertas)), "fecha": datetime.now().strftime("%d/%m/%Y %H:%M"), "estado": "Auditada", "usuario": st.session_state.user})
                 st.download_button(label="Descargar Certificado AXIS PDF", data=pdf_bytes, file_name="Certificado_Auditoria_AXIS.pdf", mime="application/pdf", type="primary", use_container_width=True)
+                del pdf_bytes
+                import gc; gc.collect()
 
         render_paginated_df(df, key_prefix="auditoria_main")
 
@@ -810,7 +842,8 @@ def render_fabrica_pdf_tab():
     factura_seleccionada = st.selectbox("Seleccione una factura:", df["NUMERO_FACTURA"].tolist(), key="pdf_selector")
     if factura_seleccionada:
         fila = df[df["NUMERO_FACTURA"] == factura_seleccionada].iloc[0]
-        pdf_bytes = generar_titulo_pdf(datos_factura=fila.to_dict(), eps=str(fila["NIT_EPS"]), ips="IPS Beneficiaria", usuario=st.session_state.user)
+        with st.spinner("Generando titulo..."):
+            pdf_bytes = generar_titulo_pdf(datos_factura=fila.to_dict(), eps=str(fila["NIT_EPS"]), ips="IPS Beneficiaria", usuario=st.session_state.user)
         if pdf_bytes:
             guardar_db({"ips": st.session_state.ips_seleccionada, "eps": str(fila["NIT_EPS"]), "no_factura": factura_seleccionada, "valor": str(fila["VALOR_TOTAL"]), "errores": "0", "fecha": datetime.now().strftime("%d/%m/%Y %H:%M"), "estado": "Titulo Generado", "usuario": st.session_state.user})
             col_d1, col_d2 = st.columns([3, 1])
@@ -824,13 +857,16 @@ def render_fabrica_pdf_tab():
                         if email_destino:
                             asunto = f"Titulo Ejecutivo - Factura {factura_seleccionada}"
                             cuerpo = f"Estimado(a),\n\nAdjunto se remite el titulo ejecutivo correspondiente a la factura {factura_seleccionada}.\n\nCordialmente,\nDepartamento de Cartera - GRUPO AXIS S.A.S."
-                            ok, msg = enviar_titulo_email(email_destino, asunto, cuerpo, pdf_bytes, f"Titulo_{factura_seleccionada}.pdf", config_email)
+                            with st.spinner("Enviando correo..."):
+                                ok, msg = enviar_titulo_email(email_destino, asunto, cuerpo, pdf_bytes, f"Titulo_{factura_seleccionada}.pdf", config_email)
                             if ok:
                                 st.success(msg)
                             else:
                                 st.error(msg)
                         else:
                             st.warning("Ingrese un correo destinatario")
+            del pdf_bytes
+            import gc; gc.collect()
 
     st.divider()
     st.markdown('<p class="section-title">Consolidado Masivo por EPS</p>', unsafe_allow_html=True)
@@ -842,16 +878,36 @@ def render_fabrica_pdf_tab():
     if eps_seleccionada:
         df_eps = df[df["NIT_EPS"] == eps_seleccionada]
         st.markdown(f"**{len(df_eps)} facturas** de **{resolver_nombre_eps(eps_seleccionada)}** | Total: **$ {df_eps['VALOR_TOTAL'].sum():,.0f}**")
+        batch_size = st.number_input("Lotes por procesamiento:", min_value=1, max_value=100, value=10, help="Procesar en lotes reduce el consumo de memoria")
         if st.button("Generar Consolidado", type="primary", use_container_width=True):
-            pdfs_generados = []
-            for _, f in df_eps.iterrows():
-                pdf_bytes = generar_titulo_pdf(datos_factura=f.to_dict(), eps=str(eps_seleccionada), ips="IPS Beneficiaria", usuario=st.session_state.user)
-                if pdf_bytes:
-                    pdfs_generados.append((str(f["NUMERO_FACTURA"]), pdf_bytes))
-                guardar_db({"ips": st.session_state.ips_seleccionada, "eps": resolver_nombre_eps(eps_seleccionada), "no_factura": str(f["NUMERO_FACTURA"]), "valor": str(f["VALOR_TOTAL"]), "errores": "0", "fecha": datetime.now().strftime("%d/%m/%Y %H:%M"), "estado": "Consolidado", "usuario": st.session_state.user})
-            st.success(f"Consolidado generado: {len(pdfs_generados)} titulos.")
+            total_facturas = len(df_eps)
+            pdfs_para_email = []
+            with st.spinner(f"Compilando {total_facturas} titulos en lotes de {batch_size}..."):
+                progress_bar = st.progress(0)
+                pdfs_generados = 0
+                for i in range(0, total_facturas, batch_size):
+                    batch = df_eps.iloc[i:min(i + batch_size, total_facturas)]
+                    for _, f in batch.iterrows():
+                        pdf_bytes = generar_titulo_pdf(datos_factura=f.to_dict(), eps=str(eps_seleccionada), ips="IPS Beneficiaria", usuario=st.session_state.user)
+                        if pdf_bytes:
+                            pdfs_generados += 1
+                            if len(pdfs_para_email) < 5:
+                                pdfs_para_email.append((str(f["NUMERO_FACTURA"]), pdf_bytes))
+                            del pdf_bytes
+                        guardar_db({"ips": st.session_state.ips_seleccionada, "eps": resolver_nombre_eps(eps_seleccionada), "no_factura": str(f["NUMERO_FACTURA"]), "valor": str(f["VALOR_TOTAL"]), "errores": "0", "fecha": datetime.now().strftime("%d/%m/%Y %H:%M"), "estado": "Consolidado", "usuario": st.session_state.user})
+                    progreso = min((i + len(batch)) / total_facturas, 1.0)
+                    progress_bar.progress(progreso)
+                    import gc; gc.collect()
+                progress_bar.progress(1.0)
+            st.success(f"Consolidado generado: {pdfs_generados} titulos completados.")
+            if pdfs_para_email:
+                st.session_state["consolidado_pdfs"] = pdfs_para_email
+                st.session_state["consolidado_eps_nombre"] = resolver_nombre_eps(eps_seleccionada)
+            del df_eps
+            import gc; gc.collect()
+        if "consolidado_pdfs" in st.session_state:
             config_email = cargar_config_email()
-            if config_email.get("enabled") and pdfs_generados:
+            if config_email.get("enabled"):
                 st.markdown("**Enviar consolidado por correo**")
                 col_e1, col_e2 = st.columns([2, 1])
                 with col_e1:
@@ -859,13 +915,14 @@ def render_fabrica_pdf_tab():
                 with col_e2:
                     if st.button("Enviar por Correo", use_container_width=True):
                         if email_destino:
-                            asunto = f"Consolidado Titulos Ejecutivos - {resolver_nombre_eps(eps_seleccionada)}"
-                            cuerpo = f"Estimado(a),\n\nAdjunto se remiten {len(pdfs_generados)} titulos ejecutivos correspondientes a la EPS {resolver_nombre_eps(eps_seleccionada)}.\n\nCordialmente,\nDepartamento de Cartera - GRUPO AXIS S.A.S."
-                            ok, msg = enviar_titulo_email(email_destino, asunto, cuerpo, pdfs_generados[0][1], f"Titulo_{pdfs_generados[0][0]}.pdf", config_email)
-                            if ok:
-                                st.success(f"Primer titulo enviado. Se enviaran {len(pdfs_generados)} titulos en total.")
-                            else:
-                                st.error(msg)
+                            eps_nom = st.session_state.get("consolidado_eps_nombre", "EPS")
+                            total_pdfs = len(st.session_state["consolidado_pdfs"])
+                            with st.spinner(f"Enviando {total_pdfs} titulos..."):
+                                for nombre_arch, pdf_data in st.session_state["consolidado_pdfs"]:
+                                    asunto = f"Consolidado Titulos Ejecutivos - {eps_nom}"
+                                    cuerpo = f"Estimado(a),\n\nAdjunto se remiten titulos ejecutivos correspondientes a la EPS {eps_nom}.\n\nCordialmente,\nDepartamento de Cartera - GRUPO AXIS S.A.S."
+                                    ok, msg = enviar_titulo_email(email_destino, asunto, cuerpo, pdf_data, f"Titulo_{nombre_arch}.pdf", config_email)
+                                st.success(f"Correo enviado con {total_pdfs} titulos adjuntos.")
                         else:
                             st.warning("Ingrese un correo destinatario")
 
@@ -886,6 +943,8 @@ def render_informes_tab():
             guardar_db({"ips": ips_nombre, "eps": "N/A", "no_factura": f"{len(alertas)} errores", "valor": "N/A", "errores": str(len(alertas)), "fecha": datetime.now().strftime("%d/%m/%Y %H:%M"), "estado": "Informe Generado", "usuario": st.session_state.user})
             st.success(f"Informe generado: {len(alertas)} errores en periodo {periodo.lower()}.")
             st.download_button(label="Descargar Informe", data=pdf_bytes, file_name=f"Informe_{periodo}.pdf", mime="application/pdf", type="primary", use_container_width=True)
+            del pdf_bytes
+            import gc; gc.collect()
 
 
 def generar_informe_hallazgos(df_alertas, ips_nombre, periodo, usuario):
@@ -895,45 +954,44 @@ def generar_informe_hallazgos(df_alertas, ips_nombre, periodo, usuario):
             logo_path = None
         pdf = TituloPDF(format="Letter", logo_path=logo_path)
         pdf.usuario_impresion = latin(usuario)
-        pdf.set_auto_page_break(auto=True, margin=45)
+        pdf.fecha_impresion = latin(datetime.now().strftime("%d/%m/%Y"))
+        pdf.set_auto_page_break(auto=True, margin=25)
         pdf.add_page()
-        pdf.set_margins(left=25, top=65, right=25)
+        pdf.set_margins(left=15, top=5, right=15)
 
         ahora = latin(datetime.now().strftime("%d/%m/%Y - %H:%M:%S"))
         total_errores = len(df_alertas)
 
-        pdf.set_font("Helvetica", "", 10)
+        pdf.set_font("Helvetica", "", 8)
         pdf.set_text_color(0, 0, 0)
-        pdf.cell(0, 6, f"Fecha: {ahora}", ln=1, align="R")
-        pdf.ln(8)
+        pdf.cell(0, 4, f"Fecha: {ahora}", ln=1, align="R")
+        pdf.ln(1)
 
-        pdf.set_font("Helvetica", "B", 12)
+        pdf.set_font("Helvetica", "B", 10)
         pdf.set_text_color(10, 26, 63)
-        pdf.cell(0, 8, latin(f"INFORME DE HALLAZGOS - {periodo.upper()}"), ln=1, align="C")
-        pdf.ln(4)
-        pdf.set_font("Helvetica", "", 10)
-        pdf.cell(0, 6, latin(f"IPS: {ips_nombre}"), ln=1)
-        pdf.ln(6)
+        pdf.cell(0, 6, latin(f"INFORME DE HALLAZGOS - {periodo.upper()}"), ln=1, align="C")
+        pdf.ln(1)
+        pdf.set_font("Helvetica", "", 8)
+        pdf.cell(0, 4, latin(f"IPS: {ips_nombre}"), ln=1)
+        pdf.ln(2)
 
-        pdf.set_draw_color(92, 160, 242)
-        pdf.line(pdf.l_margin, pdf.get_y(), pdf.w - pdf.r_margin, pdf.get_y())
-        pdf.ln(8)
-
-        pdf.multi_cell(0, 6, latin(f"Señores {ips_nombre}: Hemos detectado {total_errores} errores de digitacion este periodo ({periodo}). Observaciones: Mejorar la codificacion SOAT en el servicio de urgencias."))
-        pdf.ln(8)
+        pdf.set_font("Helvetica", "", 8)
+        pdf.set_text_color(0, 0, 0)
+        pdf.multi_cell(0, 4, latin(f"Señores {ips_nombre}: Hemos detectado {total_errores} errores este periodo ({periodo}). Observaciones: Mejorar la codificacion SOAT en urgencias."))
+        pdf.ln(2)
 
         if total_errores > 0:
-            pdf.set_font("Helvetica", "B", 10)
+            pdf.set_font("Helvetica", "B", 8)
             pdf.set_text_color(10, 26, 63)
-            pdf.cell(0, 7, latin("Errores Detectados"), ln=1)
-            pdf.ln(2)
-            pdf.set_font("Helvetica", "", 9)
+            pdf.cell(0, 5, latin("Errores Detectados"), ln=1)
+            pdf.ln(1)
+            pdf.set_font("Helvetica", "", 7)
             pdf.set_text_color(0, 0, 0)
             for _, a in df_alertas.iterrows():
-                pdf.cell(0, 6, latin(f"- Fila {a.get('fila', '')}: {a.get('tipo', '')} | CUPS: {a.get('cups', '')}"), ln=1)
+                pdf.cell(0, 4, latin(f"- Fila {a.get('fila', '')}: {a.get('tipo', '')} | CUPS: {a.get('cups', '')}"), ln=1)
 
-        pdf.ln(8)
-        pdf.multi_cell(0, 6, latin("Informe generado por sistema aQario - Grupo AXIS S.A.S."))
+        pdf.ln(3)
+        pdf.multi_cell(0, 4, latin("Informe generado por sistema aQario - Grupo AXIS S.A.S."))
         return pdf.output(dest="S").encode("latin-1")
     except Exception as e:
         st.error(f"Error: {str(e)}")
