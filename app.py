@@ -236,33 +236,36 @@ class TituloPDF(FPDF):
     def header(self):
         if self.logo_path and os.path.exists(self.logo_path):
             try:
-                self.image(self.logo_path, x=10, y=8, w=22)
+                self.image(self.logo_path, x=10, y=8, w=20)
             except Exception:
                 pass
+        
         self.set_xy(35, 8)
-        self.set_font("Helvetica", "B", 9)
+        self.set_font("Helvetica", "B", 16)
         self.set_text_color(10, 26, 63)
-        self.cell(0, 4, "NOTIFICACION FORMAL - TITULO VALOR", ln=1, align="L")
-        self.set_xy(35, 12)
-        self.set_font("Helvetica", "I", 7)
+        self.cell(0, 8, "NOTIFICACION FORMAL DE TITULO EJECUTIVO", ln=1, align="L")
+        
+        self.set_xy(35, 18)
+        self.set_font("Helvetica", "I", 8)
         self.set_text_color(100, 100, 100)
-        self.cell(0, 3, "aQario - Grupo AXIS S.A.S. NIT 902021366", ln=1, align="L")
-        self.ln(3)
+        self.cell(0, 5, "aQario - Grupo AXIS S.A.S. | NIT 902021366 | Medellin, Colombia", ln=1, align="L")
+        
+        self.ln(4)
         self.set_draw_color(10, 26, 63)
-        self.set_line_width(0.5)
+        self.set_line_width(0.8)
         self.line(10, self.get_y(), self.w - 10, self.get_y())
-        self.ln(2)
+        self.ln(4)
 
     def footer(self):
-        self.set_y(-20)
+        self.set_y(-15)
         self.set_draw_color(10, 26, 63)
         self.set_line_width(0.3)
         self.line(10, self.get_y(), self.w - 10, self.get_y())
         self.ln(2)
         self.set_font("Helvetica", "I", 6)
         self.set_text_color(0, 0, 0)
-        self.cell(0, 4, latin(f"Generado por: {self.usuario_impresion} | {self.fecha_impresion}"), ln=1, align="C")
-        self.cell(0, 4, latin("GRUPO AXIS S.A.S. - NIT 902021366 - Documento valido como titulo valor"), ln=1, align="C")
+        self.cell(0, 4, f"Generado por: {self.usuario_impresion} | {self.fecha_impresion}", ln=1, align="C")
+        self.cell(0, 4, "GRUPO AXIS S.A.S. - NIT 902021366 | Medellin, Colombia", ln=1, align="C")
 
 
 def generar_titulo_pdf(datos_factura, eps, ips, usuario):
@@ -276,81 +279,92 @@ def generar_titulo_pdf(datos_factura, eps, ips, usuario):
         pdf.set_margins(left=15, top=5, right=15)
 
         ahora = datetime.now().strftime("%d/%m/%Y - %H:%M:%S")
-        pdf.set_font("Helvetica", "", 8)
+        pdf.set_font("Helvetica", "", 9)
         pdf.set_text_color(0, 0, 0)
-        pdf.cell(0, 4, f"Medellin, {ahora}", ln=1, align="R")
-        pdf.ln(2)
-
-        pdf.set_font("Helvetica", "B", 10)
-        pdf.set_text_color(10, 26, 63)
-        pdf.cell(0, 6, f"NOTIFICACION DE COBRO PREJURIDICO - FACTURA {datos_factura.get('NUMERO_FACTURA', 'N/A')}", ln=1, align="C")
+        pdf.cell(0, 5, f"Medellin, Colombia - {ahora}", ln=1, align="R")
         pdf.ln(2)
 
         eps_nombre = resolver_nombre_eps(eps)
-        pdf.set_font("Helvetica", "", 8)
+        pdf.set_font("Helvetica", "", 9)
         pdf.set_text_color(0, 0, 0)
-        pdf.multi_cell(0, 4, f"Senores: {eps_nombre} (NIT {eps})\nReferencia: Notificacion formal de cobro prejudicial por servicios de salud prestados.\nLugar de emision: Medellin, Colombia.")
-        pdf.ln(2)
+        pdf.multi_cell(0, 5, f"Señores: {eps_nombre} (NIT {eps})\nReferencia: Notificacion formal de cobro prejudicial por servicios de salud.\nLugar de emision: Medellin, Colombia.")
+        pdf.ln(4)
 
-        pdf.set_font("Helvetica", "B", 8)
+        pdf.set_font("Helvetica", "B", 9)
         pdf.set_text_color(10, 26, 63)
-        pdf.cell(0, 5, "DATOS DEL TITULO EJECUTIVO", ln=1)
+        pdf.cell(0, 6, "DATOS DEL TITULO EJECUTIVO", ln=1)
         pdf.set_draw_color(10, 26, 63)
-        pdf.set_line_width(0.3)
+        pdf.set_line_width(0.5)
         pdf.line(15, pdf.get_y(), pdf.w - 15, pdf.get_y())
-        pdf.ln(2)
+        pdf.ln(4)
 
-        col1_x = 15
-        col2_x = 105
-        row_h = 5
-        pdf.set_font("Helvetica", "B", 7)
+        col_w = 95
+        row_h = 7
+        x_start = 15
+
+        pdf.set_font("Helvetica", "B", 9)
         pdf.set_text_color(10, 26, 63)
+        pdf.set_x(x_start)
+        pdf.cell(col_w, row_h, "No. Factura:", border=0, ln=0)
+        pdf.set_font("Helvetica", "", 9)
+        pdf.set_text_color(0, 0, 0)
+        pdf.cell(col_w, row_h, str(datos_factura.get("NUMERO_FACTURA", "N/A")), border=0, ln=0)
+        pdf.set_font("Helvetica", "B", 9)
+        pdf.set_text_color(10, 26, 63)
+        pdf.cell(col_w, row_h, "Fecha Radicado:", border=0, ln=1)
 
-        datos = [
-            ("No. Factura:", str(datos_factura.get("NUMERO_FACTURA", "N/A")), "Fecha Radicado:", str(datos_factura.get("FECHA_RADICADO", "N/A"))),
-            ("Paciente:", str(datos_factura.get("NOMBRE_PACIENTE", datos_factura.get("Nombre_Paciente", "N/A"))), "Documento:", str(datos_factura.get("DOCUMENTO", datos_factura.get("NUMERO_DOCUMENTO", datos_factura.get("TIPO_DOCUMENTO", "N/A"))))),
-            ("CUPS:", str(datos_factura.get("CODIGO_CUPS", "N/A")), "Diagnostico:", str(datos_factura.get("DIAGNOSTICO", "N/A"))),
-            ("Profesional:", str(datos_factura.get("MEDICO_TRATANTE", datos_factura.get("Medico_Tratante", "No especificado"))), "Ciudad:", "Medellin"),
-            ("EPS:", eps_nombre, "Valor:", f"$ {int(float(datos_factura.get('VALOR_TOTAL', 0))):,.0f} COP" if isinstance(datos_factura.get("VALOR_TOTAL", 0), (int, float)) else "N/A"),
-        ]
+        pdf.set_font("Helvetica", "B", 9)
+        pdf.set_text_color(10, 26, 63)
+        pdf.set_x(x_start)
+        pdf.cell(col_w, row_h, "Paciente:", border=0, ln=0)
+        pdf.set_font("Helvetica", "", 9)
+        pdf.set_text_color(0, 0, 0)
+        pdf.cell(col_w, row_h, str(datos_factura.get("NOMBRE_PACIENTE", datos_factura.get("Nombre_Paciente", "N/A")))[:30], border=0, ln=0)
+        pdf.set_font("Helvetica", "B", 9)
+        pdf.set_text_color(10, 26, 63)
+        pdf.cell(col_w, row_h, "Documento:", border=0, ln=1)
 
-        y_start = pdf.get_y()
-        for i, (l1, v1, l2, v2) in enumerate(datos):
-            if pdf.get_y() > 240:
-                break
-            pdf.set_xy(col1_x, pdf.get_y())
-            pdf.set_font("Helvetica", "B", 7)
-            pdf.set_text_color(10, 26, 63)
-            pdf.cell(25, row_h, l1)
-            pdf.set_font("Helvetica", "", 7)
-            pdf.set_text_color(0, 0, 0)
-            pdf.cell(55, row_h, v1[:30])
-            pdf.set_xy(col2_x, pdf.get_y() - row_h)
-            pdf.set_font("Helvetica", "B", 7)
-            pdf.set_text_color(10, 26, 63)
-            pdf.cell(25, row_h, l2)
-            pdf.set_font("Helvetica", "", 7)
-            pdf.set_text_color(0, 0, 0)
-            pdf.cell(55, row_h, v2[:30], ln=1)
+        pdf.set_font("Helvetica", "B", 9)
+        pdf.set_text_color(10, 26, 63)
+        pdf.set_x(x_start)
+        pdf.cell(col_w, row_h, "CUPS:", border=0, ln=0)
+        pdf.set_font("Helvetica", "", 9)
+        pdf.set_text_color(0, 0, 0)
+        pdf.cell(col_w, row_h, str(datos_factura.get("CODIGO_CUPS", "N/A")), border=0, ln=0)
+        pdf.set_font("Helvetica", "B", 9)
+        pdf.set_text_color(10, 26, 63)
+        pdf.cell(col_w, row_h, "Diagnostico:", border=0, ln=1)
 
-        pdf.ln(3)
+        pdf.set_font("Helvetica", "B", 9)
+        pdf.set_text_color(10, 26, 63)
+        pdf.set_x(x_start)
+        pdf.cell(col_w, row_h, "Profesional:", border=0, ln=0)
+        pdf.set_font("Helvetica", "", 9)
+        pdf.set_text_color(0, 0, 0)
+        pdf.cell(col_w, row_h, str(datos_factura.get("MEDICO_TRATANTE", datos_factura.get("Medico_Tratante", "No especificado")))[:30], border=0, ln=0)
+        pdf.set_font("Helvetica", "B", 9)
+        pdf.set_text_color(10, 26, 63)
+        pdf.cell(col_w, row_h, "Fecha Atencion:", border=0, ln=1)
+
+        pdf.ln(6)
         pdf.set_draw_color(10, 26, 63)
         pdf.set_fill_color(235, 240, 255)
-        pdf.set_font("Helvetica", "B", 10)
+        pdf.set_font("Helvetica", "B", 12)
         pdf.set_text_color(0, 0, 0)
+        pdf.set_x(15)
+        pdf.cell(60, 10, "VALOR TOTAL A COBRAR:", border=1, fill=True, ln=0)
         valor_total = datos_factura.get("VALOR_TOTAL", 0)
         valor_str = f"$ {int(float(valor_total)):,.0f} COP" if isinstance(valor_total, (int, float)) else str(valor_total)
-        pdf.set_xy(15, pdf.get_y())
-        pdf.cell(60, 8, "VALOR TOTAL A COBRAR:", border=1, fill=True)
-        pdf.set_font("Helvetica", "B", 11)
-        pdf.cell(120, 8, valor_str, border=1, align="C", ln=1)
+        pdf.set_font("Helvetica", "B", 14)
+        pdf.set_text_color(10, 26, 63)
+        pdf.cell(120, 10, valor_str, border=1, fill=True, align="C", ln=1)
 
-        pdf.ln(3)
-        pdf.set_font("Helvetica", "", 7)
+        pdf.ln(6)
+        pdf.set_font("Helvetica", "", 9)
         pdf.set_text_color(0, 0, 0)
-        pdf.multi_cell(0, 4, f"La entidad beneficiaria {ips}, actuando bajo contrato de mandato con GRUPO AXIS S.A.S., EXIGE el pago de esta obligacion economica. Este documento constituye notificacion formal. El incumplimiento facultara para iniciar acciones judiciales mediante proceso ejecutivo.")
-        pdf.ln(2)
-        pdf.multi_cell(0, 4, "Cordialmente,\nDepartamento de Recaudo y Cartera - GRUPO AXIS S.A.S.\nNIT 902021366 | Medellin, Colombia")
+        pdf.multi_cell(0, 5, f"La entidad beneficiaria {ips}, bajo contrato de mandato con GRUPO AXIS S.A.S., EXIGE el pago de esta obligacion economica. Este documento constituye notificacion formal. El incumplimiento facultara para iniciar acciones judiciales mediante proceso ejecutivo.")
+        pdf.ln(3)
+        pdf.multi_cell(0, 5, "Cordialmente,\nDepartamento de Recaudo y Cartera - GRUPO AXIS S.A.S.\nNIT 902021366-2 | Medellin, Colombia")
 
         pdf_output = pdf.output(dest="S")
         if isinstance(pdf_output, (bytes, bytearray)):
@@ -560,8 +574,12 @@ CUSTOM_CSS = """
     .stTabs [data-baseweb="tab-list"] button[aria-selected="true"] { background-color: #0A1A3F !important; color: #FFFFFF !important; border-color: #0A1A3F !important; }
     .stTabs [data-baseweb="tab"] span { color: #0A1A3F !important; }
     .stTabs [data-baseweb="tab-list"] button[aria-selected="true"] span { color: #FFFFFF !important; }
-    .stSelectbox [data-baseweb="select"] { color: #000000 !important; }
-    .stSelectbox [data-baseweb="select"] * { color: #000000 !important; }
+    .stSelectbox [data-baseweb="select"] { background-color: #FFFFFF !important; color: #0A1A3F !important; }
+    .stSelectbox [data-baseweb="select"] * { background-color: #FFFFFF !important; color: #0A1A3F !important; }
+    .stSelectbox [data-baseweb="select"] > div { background-color: #FFFFFF !important; color: #0A1A3F !important; }
+    .stSelectbox input { background-color: #FFFFFF !important; color: #0A1A3F !important; }
+    [data-testid="stSidebar"] .stSelectbox [data-baseweb="select"] { background-color: #F0F0F0 !important; color: #0A1A3F !important; }
+    [data-testid="stSidebar"] .stSelectbox [data-baseweb="select"] * { color: #0A1A3F !important; }
     .stMetric { background-color: #FFFFFF; border-radius: 8px; padding: 1rem; }
     .stMetric label, .stMetric p, .stMetric span { color: #000000 !important; font-weight: 600 !important; }
     div[data-testid="stExpander"] { background-color: transparent; }
@@ -626,6 +644,10 @@ if "pagina_actual" not in st.session_state:
     st.session_state.pagina_actual = 1
 if "fecha_auditoria_inicio" not in st.session_state:
     st.session_state.fecha_auditoria_inicio = None
+if "db_cargada" not in st.session_state:
+    st.session_state.db_cargada = cargar_db()
+if "df_auditoria_cargado" not in st.session_state:
+    st.session_state.df_auditoria_cargado = cargar_db()
 if "db_cargada" not in st.session_state:
     st.session_state.db_cargada = cargar_db()
 ROWS_POR_PAGINA = 100
