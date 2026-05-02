@@ -128,127 +128,97 @@ input, .stSelectbox div { color: #000000 !important; background-color: #FFFFFF !
 .stDataFrame td, .stDataFrame th { color: #0A1A3F !important; }
 </style>"""
 
-class TituloPDF(FPDF):
-    def header(self):
-        try:
-            self.image(os.path.join(DIR_ACTUAL, 'logo_aqario.png'), x=10, y=8, w=35)
-            self.ln(20)
-        except:
-            self.set_font('Helvetica', 'B', 14)
-            self.cell(0, 10, clean_text('aQario - GRUPO AXIS S.A.S.'), ln=1)
-        
-        self.set_font("Helvetica", "I", 8)
-        self.set_text_color(100, 100, 100)
-        self.cell(0, 5, clean_text("aQario | GRUPO AXIS S.A.S. | NIT 902021366 | Medellin"), ln=1, align="R")
-        self.ln(3)
-        self.set_draw_color(10, 26, 63)
-        self.set_line_width(0.5)
-        self.line(10, self.get_y(), self.w - 10, self.get_y())
-        self.ln(5)
-
-    def footer(self):
-        self.set_y(-15)
-        self.set_draw_color(10, 26, 63)
-        self.line(10, self.get_y(), self.w - 10, self.get_y())
-        self.ln(3)
-        self.set_font("Helvetica", "I", 6)
-        self.set_text_color(0, 0, 0)
-        self.cell(0, 4, clean_text(f"Generado por: {self.usuario} | {self.fecha}"), ln=1, align="C")
-
-def generar_titulo_pdf(datos_factura, eps, ips, usuario):
+def generar_titulo_pdf(datos, perfil_ips):
+    clean = lambda s: str(s).replace('—','-').replace('–','-').replace('"','"').replace('"','"').replace(''', "'").replace(''', "'").replace('…','...').encode('latin-1','ignore').decode('latin-1')
+    
+    pdf = FPDF(orientation='P', unit='mm', format='A4')
+    pdf.add_page()
+    pdf.set_margins(20, 20, 20)
+    pdf.set_auto_page_break(auto=True, margin=20)
+    pdf.set_xy(20, 20)
+    
     try:
-        perfil = get_perfil_ips() or {}
-        
-        pdf = TituloPDF()
-        pdf.usuario = usuario
-        pdf.fecha = datetime.now().strftime("%d/%m/%Y %H:%M")
-        pdf.set_auto_page_break(auto=True, margin=25)
-        pdf.add_page()
-        pdf.set_margins(15, 15, 15)
-
-        pdf.set_font("Helvetica", "B", 14)
+        pdf.image(os.path.join(DIR_ACTUAL, 'logo_aqario.png'), x=20, y=15, w=35)
+        pdf.set_xy(20, 40)
+    except:
+        pdf.set_font('Helvetica', 'B', 12)
+        pdf.multi_cell(0, 8, clean('aQario - GRUPO AXIS S.A.S.'))
+    
+    pdf.set_font('Helvetica', 'B', 14)
+    pdf.set_text_color(10, 26, 63)
+    pdf.multi_cell(0, 8, clean('NOTIFICACION FORMAL DE TITULO EJECUTIVO'), align='C')
+    pdf.ln(3)
+    
+    pdf.set_font('Helvetica', '', 9)
+    pdf.set_text_color(0, 0, 0)
+    pdf.multi_cell(0, 6, clean(f'Medellin, Colombia - {datetime.now().strftime("%d/%m/%Y %H:%M")}'), align='R')
+    pdf.ln(4)
+    
+    pdf.set_draw_color(10, 26, 63)
+    pdf.set_line_width(0.5)
+    pdf.line(20, pdf.get_y(), 190, pdf.get_y())
+    pdf.ln(5)
+    
+    campos = [
+        ('No. Factura', datos.get('NUMERO_FACTURA', 'N/A')),
+        ('Paciente', datos.get('NOMBRE_PACIENTE', datos.get('Nombre_Paciente', 'No especificado'))),
+        ('Documento', datos.get('DOCUMENTO', datos.get('NUMERO_DOCUMENTO', 'No especificado'))),
+        ('Fecha Atencion', datos.get('FECHA_ATENCION', datos.get('FECHA_RADICADO', 'No especificado'))),
+        ('Codigo CUPS', datos.get('CODIGO_CUPS', 'No especificado')),
+        ('Diagnostico', datos.get('DIAGNOSTICO', 'No especificado')),
+        ('Profesional', datos.get('MEDICO_TRATANTE', datos.get('Medico_Tratante', 'No especificado'))),
+        ('EPS Deudora', datos.get('NIT_EPS', 'No especificado')),
+    ]
+    
+    for label, valor in campos:
+        pdf.set_font('Helvetica', 'B', 10)
         pdf.set_text_color(10, 26, 63)
-        pdf.cell(0, 10, clean_text("NOTIFICACION FORMAL DE TITULO EJECUTIVO"), ln=1, align="C")
-        pdf.ln(5)
-
-        pdf.set_font("Helvetica", "", 10)
+        pdf.multi_cell(0, 7, clean(f'{label}:'), align='L')
+        pdf.set_font('Helvetica', '', 10)
         pdf.set_text_color(0, 0, 0)
-        pdf.cell(0, 6, clean_text(f"Medellin, Colombia - {datetime.now().strftime('%d/%m/%Y')}"), ln=1, align="R")
-        pdf.ln(5)
-
-        ips_nombre = perfil.get("nombre_ips", ips or "IPS Beneficiaria")
-        ips_nit = perfil.get("nit_ips", eps)
-        
-        pdf.set_font("Helvetica", "B", 11)
-        pdf.set_text_color(10, 26, 63)
-        pdf.cell(0, 8, clean_text("DATOS DE LA OBLIGACION"), ln=1)
-        pdf.set_draw_color(10, 26, 63)
-        pdf.line(15, pdf.get_y(), pdf.w - 15, pdf.get_y())
-        pdf.ln(5)
-
-        row_h = 8
-        
-        pdf.set_font("Helvetica", "B", 9)
-        pdf.set_text_color(10, 26, 63)
-        pdf.multi_cell(0, row_h, f"No. Factura: {clean_text(datos_factura.get('NUMERO_FACTURA', 'N/A'))}", border=0)
-        
-        pdf.set_font("Helvetica", "B", 9)
-        pdf.set_text_color(10, 26, 63)
-        pdf.multi_cell(0, row_h, f"Paciente: {clean_text(datos_factura.get('NOMBRE_PACIENTE', datos_factura.get('Nombre_Paciente', 'No especificado')))}", border=0)
-        
-        pdf.set_font("Helvetica", "B", 9)
-        pdf.set_text_color(10, 26, 63)
-        pdf.multi_cell(0, row_h, f"Documento: {clean_text(datos_factura.get('DOCUMENTO', datos_factura.get('NUMERO_DOCUMENTO', 'No especificado')))}", border=0)
-        
-        pdf.set_font("Helvetica", "B", 9)
-        pdf.set_text_color(10, 26, 63)
-        pdf.multi_cell(0, row_h, f"Fecha Atencion: {clean_text(datos_factura.get('FECHA_ATENCION', 'No especificado'))}", border=0)
-        
-        pdf.set_font("Helvetica", "B", 9)
-        pdf.set_text_color(10, 26, 63)
-        pdf.multi_cell(0, row_h, f"CUPS: {clean_text(datos_factura.get('CODIGO_CUPS', 'No especificado'))}", border=0)
-        
-        pdf.set_font("Helvetica", "B", 9)
-        pdf.set_text_color(10, 26, 63)
-        pdf.multi_cell(0, row_h, f"Diagnostico: {clean_text(datos_factura.get('DIAGNOSTICO', 'No especificado'))}", border=0)
-        
-        pdf.set_font("Helvetica", "B", 9)
-        pdf.set_text_color(10, 26, 63)
-        pdf.multi_cell(0, row_h, f"Profesional: {clean_text(datos_factura.get('MEDICO_TRATANTE', datos_factura.get('Medico_Tratante', 'No especificado')))}", border=0)
-
-        pdf.ln(5)
-        pdf.set_draw_color(10, 26, 63)
-        pdf.set_fill_color(235, 240, 255)
-        pdf.set_font("Helvetica", "B", 12)
-        pdf.set_text_color(0, 0, 0)
-        
-        valor = datos_factura.get("VALOR_TOTAL", 0)
-        valor_str = f"$ {int(float(valor)):,.0f} COP" if isinstance(valor, (int, float)) else str(valor)
-        pdf.cell(0, 12, clean_text(f"VALOR TOTAL A COBRAR: {valor_str}"), border=1, fill=True, align="C", ln=1)
-
-        pdf.ln(8)
-        pdf.set_font("Helvetica", "B", 11)
-        pdf.set_text_color(10, 26, 63)
-        pdf.cell(0, 8, clean_text("REQUERIMIENTO DE PAGO PRE-JURIDICO"), ln=1)
-        pdf.ln(3)
-        
-        pdf.set_font("Helvetica", "", 9)
-        pdf.set_text_color(0, 0, 0)
-        texto = f"En nuestra calidad de representantes de {ips_nombre}, le notificamos que las facturas detalladas presentan estado de mora que afecta la liquidez de nuestro representado. GRUPO AXIS S.A.S. ha sido facultado para el recaudo administrativo y judicial. Le instamos a realizar el pago en un plazo no mayor a 48 horas. De lo contrario, procederemos con la radicacion del titulo para Proceso Ejecutivo, generando honorarios y costas procesales a que haya lugar."
-        pdf.multi_cell(0, 5, clean_text(texto))
-
-        pdf.ln(8)
-        pdf.set_font("Helvetica", "", 8)
-        pdf.set_text_color(0, 0, 0)
-        pdf.multi_cell(0, 5, clean_text("Departamento de Recaudo y Gestion de Cartera - GRUPO AXIS S.A.S. | aQario es un software creado por Grupo AXIS S.A.S. NIT 902021366 | Medellin, Colombia | El Eje de su Crecimiento"))
-
-        output = pdf.output(dest="S")
-        if isinstance(output, (bytes, bytearray)):
-            return bytes(output)
-        return output.encode("latin-1") if isinstance(output, str) else output
-    except Exception as e:
-        st.error(f"Error PDF: {str(e)}")
-        return None
+        pdf.multi_cell(0, 7, clean(str(valor)), align='L')
+        pdf.ln(1)
+    
+    pdf.ln(3)
+    pdf.set_fill_color(10, 26, 63)
+    pdf.set_text_color(255, 255, 255)
+    pdf.set_font('Helvetica', 'B', 12)
+    valor_fmt = datos.get('VALOR_TOTAL', 0)
+    try:
+        valor_str = f"$ {int(float(valor_fmt)):,}".replace(',', '.')
+    except:
+        valor_str = str(valor_fmt)
+    pdf.multi_cell(0, 10, clean(f'VALOR TOTAL A COBRAR: {valor_str}'), align='C', fill=True)
+    pdf.set_text_color(0, 0, 0)
+    pdf.set_fill_color(255, 255, 255)
+    pdf.ln(5)
+    
+    pdf.set_font('Helvetica', 'B', 10)
+    pdf.set_text_color(10, 26, 63)
+    pdf.multi_cell(0, 7, clean('REQUERIMIENTO DE PAGO PRE-JURIDICO'), align='L')
+    pdf.set_font('Helvetica', '', 9)
+    pdf.set_text_color(0, 0, 0)
+    nombre_ips = perfil_ips.get('nombre_ips', 'la IPS representada') if perfil_ips else 'la IPS representada'
+    texto_legal = (
+        f'En nuestra calidad de representantes de {nombre_ips}, le notificamos que '
+        'las facturas detalladas presentan estado de mora que afecta la liquidez de '
+        'nuestro representado. GRUPO AXIS S.A.S. ha sido facultado para el recaudo '
+        'administrativo y judicial. Le instamos a realizar el pago en un plazo no '
+        'mayor a 48 horas. De lo contrario, procederemos con la radicacion del titulo '
+        'para Proceso Ejecutivo, generando honorarios y costas procesales.'
+    )
+    pdf.multi_cell(0, 6, clean(texto_legal), align='J')
+    pdf.ln(5)
+    
+    pdf.line(20, pdf.get_y(), 190, pdf.get_y())
+    pdf.ln(3)
+    pdf.set_font('Helvetica', '', 8)
+    pdf.set_text_color(100, 100, 100)
+    pdf.multi_cell(0, 5, clean('Departamento de Recaudo y Gestion de Cartera - GRUPO AXIS S.A.S.'), align='C')
+    pdf.multi_cell(0, 5, clean('aQario es un software creado por Grupo AXIS S.A.S. NIT 902021366'), align='C')
+    pdf.multi_cell(0, 5, clean('Medellin, Colombia | El Eje de su Crecimiento'), align='C')
+    
+    return bytes(pdf.output())
 
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
@@ -375,8 +345,20 @@ def render_titulos():
     
     if factura and st.button("Generar PDF", type="primary"):
         fila = df[df["NUMERO_FACTURA"] == factura].iloc[0]
-        pdf_bytes = generar_titulo_pdf(fila.to_dict(), str(fila.get("NIT_EPS", "")), st.session_state.ips_seleccionada, st.session_state.user)
+        perfil = get_perfil_ips()
+        pdf_bytes = generar_titulo_pdf(fila.to_dict(), perfil)
         if pdf_bytes:
+            save_auditoria({
+                "ips": st.session_state.ips_seleccionada,
+                "eps": str(fila.get("NIT_EPS", "")),
+                "no_factura": factura,
+                "valor": str(fila.get("VALOR_TOTAL", 0)),
+                "errores": "0",
+                "fecha": datetime.now().strftime("%d/%m/%Y %H:%M"),
+                "estado": "PDF Generado",
+                "usuario": st.session_state.user,
+                "accion": "Generar PDF"
+            })
             st.download_button("Descargar PDF", data=pdf_bytes, file_name=f"Titulo_{factura}.pdf", mime="application/pdf", type="primary", use_container_width=True)
 
 def render_informes():
