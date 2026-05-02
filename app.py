@@ -319,20 +319,29 @@ def render_auditoria():
     st.markdown("### Datos Cargados")
     st.dataframe(df.head(50), use_container_width=True)
 
-    if st.button("Generar Titulos PDF", type="primary"):
+    if st.button("Generar Todos los PDF", type="primary"):
+        import io
+        from fpdf import FPDF
+        
+        zip_buffer = io.BytesIO()
+        perfil = get_perfil_ips()
+        
         for _, row in df.iterrows():
-            save_auditoria({
-                "ips": st.session_state.ips_seleccionada,
-                "eps": str(row.get("NIT_EPS", "")),
-                "no_factura": str(row.get("NUMERO_FACTURA", "")),
-                "valor": str(row.get("VALOR_TOTAL", 0)),
-                "errores": "0",
-                "fecha": datetime.now().strftime("%d/%m/%Y %H:%M"),
-                "estado": "Generado",
-                "usuario": st.session_state.user,
-                "accion": "Titulo PDF"
-            })
-        st.success("Titulos generados y guardados en SQLite")
+            pdf_bytes = generar_titulo_pdf(row.to_dict(), perfil)
+            if pdf_bytes:
+                save_auditoria({
+                    "ips": st.session_state.ips_seleccionada,
+                    "eps": str(row.get("NIT_EPS", "")),
+                    "no_factura": str(row.get("NUMERO_FACTURA", "")),
+                    "valor": str(row.get("VALOR_TOTAL", 0)),
+                    "errores": "0",
+                    "fecha": datetime.now().strftime("%d/%m/%Y %H:%M"),
+                    "estado": "PDF Generado",
+                    "usuario": st.session_state.user,
+                    "accion": "Generar PDF"
+                })
+        
+        st.success(f"{len(df)} titulos generados y guardados en SQLite")
 
 def render_titulos():
     df = st.session_state.df_auditoria
