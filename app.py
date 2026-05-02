@@ -19,7 +19,11 @@ st.set_page_config(page_title="aQario", page_icon="📊", layout="wide", initial
 
 DIR_ACTUAL = os.path.dirname(os.path.abspath(__file__))
 
-GSHEETS_URL = "https://docs.google.com/spreadsheets/d/1KAf0K8YQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ/edit"
+COLUMNAS_CRITICAS = ["NUMERO_FACTURA", "VALOR_TOTAL", "NIT_EPS", "FECHA_RADICADO", "CODIGO_CUPS", "DIAGNOSTICO", "NOMBRE_PACIENTE", "DOCUMENTO", "FECHA_ATENCION", "MEDICO_TRATANTE"]
+
+EPS_NOMBRES = {800123456: "Nueva EPS", 800234567: "SURA EPS", 800345678: "Salud Total", 800456789: "Coomeva", 900111222: "Sanitas"}
+
+GSHEETS_URL = "https://docs.google.com/spreadsheets/d/1KAf0K8YQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ/edit"
 PERFIL_LEGAL_PATH = os.path.join(DIR_ACTUAL, "config_perfil.json")
 DB_PATH = os.path.join(DIR_ACTUAL, "db_axis_recovery.csv")
 USERS_PATH = os.path.join(DIR_ACTUAL, "db_users.csv")
