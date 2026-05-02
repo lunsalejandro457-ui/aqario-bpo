@@ -54,6 +54,13 @@ def init_db():
         usuario TEXT,
         accion TEXT
     )''')
+    c.execute('''CREATE TABLE IF NOT EXISTS auditoria_temp (
+        NUMERO_FACTURA TEXT, VALOR_TOTAL REAL, NIT_EPS TEXT,
+        FECHA_RADICADO TEXT, CODIGO_CUPS TEXT, DIAGNOSTICO TEXT,
+        NOMBRE_PACIENTE TEXT, SEXO TEXT, EDAD TEXT,
+        DOCUMENTO TEXT, MEDICO_TRATANTE TEXT, FECHA_ATENCION TEXT,
+        ALERTAS_SISTEMA TEXT, ips_asignada TEXT
+    )''')
     c.execute('''CREATE TABLE IF NOT EXISTS mandatario (
         id INTEGER PRIMARY KEY,
         nombre_mandatario TEXT,
@@ -81,6 +88,28 @@ def init_db():
     conn.close()
 
 init_db()
+
+def init_session():
+    """Load persisted data from SQLite on startup"""
+    if 'df_auditoria' not in st.session_state:
+        st.session_state.df_auditoria = None
+    if 'auditoria_loaded' not in st.session_state:
+        st.session_state.auditoria_loaded = False
+    if 'ips_seleccionada' not in st.session_state:
+        st.session_state.ips_seleccionada = 'Todas las IPS'
+    
+    # Try to load from auditoria_temp table
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        df_saved = pd.read_sql_query("SELECT * FROM auditoria_temp", conn)
+        conn.close()
+        if len(df_saved) >0:
+            st.session_state.df_auditoria = df_saved
+            st.session_state.auditoria_loaded = True
+    except Exception as e:
+        pass
+
+init_session()
 
 def get_usuarios():
     conn = sqlite3.connect(DB_PATH)
@@ -177,7 +206,12 @@ def validar_con_manuales(df):
     df['ALERTAS_SISTEMA'] = alertas
     return df
 
-def generar_titulo_pdf(datos, perfil_ips=None, mandatario=None):
+def generar_titulo_pdf(datos, perfil_ips=None):
+    MANDATARIO_NOMBRE = "GRUPO AXIS S.A.S."
+    MANDATARIO_NIT = "902021366-2"
+    MANDATARIO_CIUDAD = "Medellin, Colombia"
+    MANDATARIO_CARGO = "Departamento de Recaudo y Gestion de Cartera"
+    
     clean = lambda s: str(s)\
         .replace('—','-').replace('–','-')\
         .replace('"','"').replace('"','"')\
@@ -185,15 +219,44 @@ def generar_titulo_pdf(datos, perfil_ips=None, mandatario=None):
         .replace('…','...').replace('\u00e9','e')\
         .encode('latin-1','ignore').decode('latin-1')
 
-    def write_line(pdf, txt, bold=False, size=10, align='L', h=7):
+    def wl(pdf, txt, bold=False, size=10, align='L', h=7):
         pdf.set_font('Helvetica', 'B' if bold else '', size)
         txt = clean(str(txt))
-        pdf.cell(0, h, txt[:90], ln=1, align=align)
-        if len(txt) > 90:
-            pdf.cell(0, h, txt[90:180], ln=1, align=align)
+        max_chars = 85
+        while txt:
+            chunk = txt[:max_chars]
+            if len(txt) > max_chars and ' ' in chunk:
+                chunk = chunk[:chunk.rfind(' ')]
+            pdf.cell(0, h, chunk, ln=1, align=align)
+            txt = txt[len(chunk):].strip()
+
+    def write_footer_legal(pdf):
+        pdf.set_font('Helvetica', '', 7)
+        lineas = [
+            'PROTECCION DE DATOS Y CONFIDENCIALIDAD:',
+            'La informacion contenida es confidencial, protegida bajo Ley 1581/2012',
+            '(Proteccion de Datos Personales), Ley 1438/2011 y Resolucion 3374/2000 (RIPS).',
+            'Su divulgacion no autorizada genera responsabilidad civil y penal.',
+            'Documento generado por aQario - GRUPO AXIS S.A.S. NIT 902021366-2 | Medellin, Colombia',
+        ]
+        for linea in lineas:
+            pdf.cell(0, 4, clean(linea), ln=1, align='C')
+
+    def add_watermark(pdf, usuario, timestamp):
+        pdf.set_text_color(200, 200, 200)
+        pdf.set_font('Helvetica', '', 8)
+        pdf.set_xy(120, 5)
+        pdf.cell(70, 5, clean(f'Impreso por: {usuario}'), align='R', ln=1)
+        pdf.set_xy(120, 9)
+        pdf.cell(70, 5, clean(f'Fecha: {timestamp}'), align='R', ln=1)
+        pdf.set_text_color(0, 0, 0)
 
     pdf = FPDF('P', 'mm', 'A4')
     pdf.add_page()
+    timestamp = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+    usuario_actual = st.session_state.get('user', 'Sistema')
+    add_watermark(pdf, usuario_actual, timestamp)
+    
     pdf.set_left_margin(20)
     pdf.set_right_margin(20)
     pdf.set_top_margin(20)
@@ -204,10 +267,10 @@ def generar_titulo_pdf(datos, perfil_ips=None, mandatario=None):
         pdf.image('logo_aqario.png', x=20, y=12, w=32)
         pdf.set_xy(20, 45)
     except:
-        write_line(pdf, 'aQario - GRUPO AXIS S.A.S.', bold=True, size=11)
+        wl(pdf, 'aQario - GRUPO AXIS S.A.S.', bold=True, size=11)
 
-    write_line(pdf, 'NOTIFICACION FORMAL DE TITULO EJECUTIVO', bold=True, size=13, align='C', h=9)
-    write_line(pdf, f'Medellin, Colombia - {datetime.now().strftime("%d/%m/%Y %H:%M")}', size=8, align='R', h=6)
+    wl(pdf, 'NOTIFICACION FORMAL DE TITULO EJECUTIVO', bold=True, size=13, align='C', h=9)
+    wl(pdf, f'Medellin, Colombia - {datetime.now().strftime("%d/%m/%Y %H:%M")}', size=8, align='R', h=6)
     pdf.ln(2)
 
     pdf.set_draw_color(10, 26, 63)
@@ -215,8 +278,9 @@ def generar_titulo_pdf(datos, perfil_ips=None, mandatario=None):
     pdf.line(20, pdf.get_y(), 190, pdf.get_y())
     pdf.ln(4)
 
-    write_line(pdf, 'REQUERIMIENTO DE PAGO PRE-JURIDICO', bold=True, size=10)
+    wl(pdf, 'REQUERIMIENTO DE PAGO PRE-JURIDICO', bold=True, size=10)
     nombre_ips = (perfil_ips or {}).get('nombre_ips', 'la IPS representada')
+    nit_ips = (perfil_ips or {}).get('nit_ips', 'N/A')
     parrafos = [
         f'En calidad de representantes de {nombre_ips}, notificamos que las facturas',
         'detalladas presentan estado de mora. GRUPO AXIS S.A.S. ha sido facultado para',
@@ -225,19 +289,17 @@ def generar_titulo_pdf(datos, perfil_ips=None, mandatario=None):
         'se radicara titulo para Proceso Ejecutivo con honorarios y costas procesales.',
     ]
     for p in parrafos:
-        write_line(pdf, p, size=9, h=6)
+        wl(pdf, p, size=9, h=6)
     pdf.ln(4)
 
-    if mandatario:
-        mand_text = (
-            f"En virtud del Contrato de Mandato No. {mandatario.get('numero_contrato_mandato', 'N/A')} de fecha {mandatario.get('fecha_contrato', 'N/A')}, "
-            f"suscrito entre {mandatario.get('nombre_mandatario', 'N/A')}, {mandatario.get('cargo_mandatario', 'N/A')} de la IPS {nombre_ips} "
-            f"(NIT {mandatario.get('nit_mandante', 'N/A')}), y GRUPO AXIS S.A.S. (NIT 902021366), se autoriza "
-            f"expresamente a GRUPO AXIS S.A.S. para gestionar el recaudo prejuridico y judicial "
-            f"de las facturas relacionadas en el presente titulo ejecutivo."
-        )
-        write_line(pdf, mand_text, size=9, h=6)
-        pdf.ln(4)
+    mand_text = (
+        f"En virtud del Contrato de Mandato suscrito entre {nombre_ips} (NIT {nit_ips}) "
+        f"y GRUPO AXIS S.A.S. (NIT 902021366-2), con domicilio en Medellin, Colombia, "
+        f"se autoriza expresamente a GRUPO AXIS S.A.S. para gestionar el recaudo "
+        f"prejuridico y judicial de las facturas relacionadas en el presente titulo ejecutivo."
+    )
+    wl(pdf, mand_text, size=9, h=6)
+    pdf.ln(4)
 
     pdf.line(20, pdf.get_y(), 190, pdf.get_y())
     pdf.ln(4)
@@ -253,7 +315,7 @@ def generar_titulo_pdf(datos, perfil_ips=None, mandatario=None):
         ('EPS Deudora', datos.get('NIT_EPS','No especificado')),
     ]
     for label, valor in campos:
-        write_line(pdf, f'{label}: {valor}', size=10, h=7)
+        wl(pdf, f'{label}: {valor}', size=10, h=7)
     pdf.ln(3)
 
     pdf.set_fill_color(10, 26, 63)
@@ -271,15 +333,44 @@ def generar_titulo_pdf(datos, perfil_ips=None, mandatario=None):
     pdf.set_draw_color(10,26,63)
     pdf.line(20, pdf.get_y(), 190, pdf.get_y())
     pdf.ln(3)
-    write_line(pdf, 'Departamento de Recaudo y Gestion de Cartera - GRUPO AXIS S.A.S.', size=8, align='C', h=5)
-    write_line(pdf, 'aQario - Software creado por Grupo AXIS S.A.S. NIT 902021366', size=8, align='C', h=5)
-    write_line(pdf, 'Medellin, Colombia | El Eje de su Crecimiento', size=8, align='C', h=5)
+    wl(pdf, 'Departamento de Recaudo y Gestion de Cartera - GRUPO AXIS S.A.S.', size=8, align='C', h=5)
+    wl(pdf, 'aQario - Software creado por Grupo AXIS S.A.S. NIT 902021366-2', size=8, align='C', h=5)
+    wl(pdf, 'Medellin, Colombia | El Eje de su Crecimiento', size=8, align='C', h=5)
     pdf.ln(3)
-    write_line(pdf, 'PROTECCION DE DATOS Y CONFIDENCIALIDAD: La informacion contenida en este documento es de caracter confidencial y esta protegida bajo la Ley 1581 de 2012 (Proteccion de Datos Personales), la Ley 1438 de 2011 (Reforma al Sistema de Salud) y la Resolucion 3374 de 2000 (RIPS). Su uso indebido o divulgacion no autorizada podra generar responsabilidad civil y penal. Este documento fue generado por aQario - Software de GRUPO AXIS S.A.S. NIT 902021366.', size=7, align='C', h=7)
+    write_footer_legal(pdf)
+
+    # Log document generation
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute("""CREATE TABLE IF NOT EXISTS log_documentos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tipo_doc TEXT,
+            numero_factura TEXT,
+            eps TEXT,
+            usuario TEXT,
+            fecha_generacion TEXT,
+            ip_session TEXT
+        )""")
+        c.execute("""INSERT INTO log_documentos 
+            (tipo_doc, numero_factura, eps, usuario, fecha_generacion)
+            VALUES (?, ?, ?, ?, ?)""",
+            ("Titulo Ejecutivo", str(datos.get('NUMERO_FACTURA', '')), 
+             str(datos.get('NIT_EPS', '')), usuario_actual, 
+             datetime.now().isoformat()))
+        conn.commit()
+        conn.close()
+    except:
+        pass
 
     return bytes(pdf.output())
 
-def generar_titulo_por_entidad(df_eps, perfil_ips, mandatario):
+def generar_titulo_por_entidad(df_eps, perfil_ips):
+    MANDATARIO_NOMBRE = "GRUPO AXIS S.A.S."
+    MANDATARIO_NIT = "902021366-2"
+    MANDATARIO_CIUDAD = "Medellin, Colombia"
+    MANDATARIO_CARGO = "Departamento de Recaudo y Gestion de Cartera"
+    
     clean = lambda s: str(s)\
         .replace('—','-').replace('–','-')\
         .replace('"','"').replace('"','"')\
@@ -287,15 +378,44 @@ def generar_titulo_por_entidad(df_eps, perfil_ips, mandatario):
         .replace('…','...').replace('\u00e9','e')\
         .encode('latin-1','ignore').decode('latin-1')
 
-    def write_line(pdf, txt, bold=False, size=10, align='L', h=7):
+    def wl(pdf, txt, bold=False, size=10, align='L', h=7):
         pdf.set_font('Helvetica', 'B' if bold else '', size)
         txt = clean(str(txt))
-        pdf.cell(0, h, txt[:90], ln=1, align=align)
-        if len(txt) > 90:
-            pdf.cell(0, h, txt[90:180], ln=1, align=align)
+        max_chars = 85
+        while txt:
+            chunk = txt[:max_chars]
+            if len(txt) > max_chars and ' ' in chunk:
+                chunk = chunk[:chunk.rfind(' ')]
+            pdf.cell(0, h, chunk, ln=1, align=align)
+            txt = txt[len(chunk):].strip()
+
+    def write_footer_legal(pdf):
+        pdf.set_font('Helvetica', '', 7)
+        lineas = [
+            'PROTECCION DE DATOS Y CONFIDENCIALIDAD:',
+            'La informacion contenida es confidencial, protegida bajo Ley 1581/2012',
+            '(Proteccion de Datos Personales), Ley 1438/2011 y Resolucion 3374/2000 (RIPS).',
+            'Su divulgacion no autorizada genera responsabilidad civil y penal.',
+            'Documento generado por aQario - GRUPO AXIS S.A.S. NIT 902021366-2 | Medellin, Colombia',
+        ]
+        for linea in lineas:
+            pdf.cell(0, 4, clean(linea), ln=1, align='C')
+
+    def add_watermark(pdf, usuario, timestamp):
+        pdf.set_text_color(200, 200, 200)
+        pdf.set_font('Helvetica', '', 8)
+        pdf.set_xy(120, 5)
+        pdf.cell(70, 5, clean(f'Impreso por: {usuario}'), align='R', ln=1)
+        pdf.set_xy(120, 9)
+        pdf.cell(70, 5, clean(f'Fecha: {timestamp}'), align='R', ln=1)
+        pdf.set_text_color(0, 0, 0)
 
     pdf = FPDF('P', 'mm', 'A4')
     pdf.add_page()
+    timestamp = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+    usuario_actual = st.session_state.get('user', 'Sistema')
+    add_watermark(pdf, usuario_actual, timestamp)
+    
     pdf.set_left_margin(20)
     pdf.set_right_margin(20)
     pdf.set_top_margin(20)
@@ -306,9 +426,9 @@ def generar_titulo_por_entidad(df_eps, perfil_ips, mandatario):
         pdf.image('logo_aqario.png', x=20, y=12, w=32)
         pdf.set_xy(20, 45)
     except:
-        write_line(pdf, 'aQario - GRUPO AXIS S.A.S.', bold=True, size=11)
+        wl(pdf, 'aQario - GRUPO AXIS S.A.S.', bold=True, size=11)
 
-    write_line(pdf, f'Medellin, Colombia - {datetime.now().strftime("%d/%m/%Y %H:%M")}', size=8, align='R', h=6)
+    wl(pdf, f'Medellin, Colombia - {datetime.now().strftime("%d/%m/%Y %H:%M")}', size=8, align='R', h=6)
     pdf.ln(2)
 
     pdf.set_draw_color(10, 26, 63)
@@ -316,7 +436,7 @@ def generar_titulo_por_entidad(df_eps, perfil_ips, mandatario):
     pdf.line(20, pdf.get_y(), 190, pdf.get_y())
     pdf.ln(4)
 
-    write_line(pdf, 'REQUERIMIENTO DE PAGO PRE-JURIDICO', bold=True, size=10)
+    wl(pdf, 'REQUERIMIENTO DE PAGO PRE-JURIDICO', bold=True, size=10)
     nombre_ips = (perfil_ips or {}).get('nombre_ips', 'la IPS representada')
     parrafos = [
         f'En calidad de representantes de {nombre_ips}, notificamos que las facturas',
@@ -326,24 +446,22 @@ def generar_titulo_por_entidad(df_eps, perfil_ips, mandatario):
         'se radicara titulo para Proceso Ejecutivo con honorarios y costas procesales.',
     ]
     for p in parrafos:
-        write_line(pdf, p, size=9, h=6)
+        wl(pdf, p, size=9, h=6)
     pdf.ln(4)
 
-    if mandatario:
-        mand_text = (
-            f"En virtud del Contrato de Mandato No. {mandatario.get('numero_contrato_mandato', 'N/A')} de fecha {mandatario.get('fecha_contrato', 'N/A')}, "
-            f"suscrito entre {mandatario.get('nombre_mandatario', 'N/A')}, {mandatario.get('cargo_mandatario', 'N/A')} de la IPS {nombre_ips} "
-            f"(NIT {mandatario.get('nit_mandante', 'N/A')}), y GRUPO AXIS S.A.S. (NIT 902021366), se autoriza "
-            f"expresamente a GRUPO AXIS S.A.S. para gestionar el recaudo prejuridico y judicial "
-            f"de las facturas relacionadas en el presente titulo ejecutivo."
-        )
-        write_line(pdf, mand_text, size=9, h=6)
-        pdf.ln(4)
+    mand_text = (
+        f"En virtud del Contrato de Mandato suscrito entre {nombre_ips} (NIT {perfil_ips.get('nit_ips', 'N/A') if perfil_ips else 'N/A'}) "
+        f"y GRUPO AXIS S.A.S. (NIT 902021366-2), con domicilio en Medellin, Colombia, "
+        f"se autoriza expresamente a GRUPO AXIS S.A.S. para gestionar el recaudo "
+        f"prejuridico y judicial de las facturas relacionadas en el presente titulo ejecutivo."
+    )
+    wl(pdf, mand_text, size=9, h=6)
+    pdf.ln(4)
 
     pdf.line(20, pdf.get_y(), 190, pdf.get_y())
     pdf.ln(4)
 
-    write_line(pdf, 'FACTURAS RELACIONADAS', bold=True, size=10)
+    wl(pdf, 'FACTURAS RELACIONADAS', bold=True, size=10)
     pdf.set_font('Helvetica', 'B', 8)
     pdf.cell(25, 7, clean('No. Factura'), border=1, align='C')
     pdf.cell(40, 7, clean('Paciente'), border=1, align='C')
@@ -379,11 +497,36 @@ def generar_titulo_por_entidad(df_eps, perfil_ips, mandatario):
     pdf.set_draw_color(10,26,63)
     pdf.line(20, pdf.get_y(), 190, pdf.get_y())
     pdf.ln(3)
-    write_line(pdf, 'Departamento de Recaudo y Gestion de Cartera - GRUPO AXIS S.A.S.', size=8, align='C', h=5)
-    write_line(pdf, 'aQario - Software creado por Grupo AXIS S.A.S. NIT 902021366', size=8, align='C', h=5)
-    write_line(pdf, 'Medellin, Colombia | El Eje de su Crecimiento', size=8, align='C', h=5)
+    wl(pdf, 'Departamento de Recaudo y Gestion de Cartera - GRUPO AXIS S.A.S.', size=8, align='C', h=5)
+    wl(pdf, 'aQario - Software creado por Grupo AXIS S.A.S. NIT 902021366-2', size=8, align='C', h=5)
+    wl(pdf, 'Medellin, Colombia | El Eje de su Crecimiento', size=8, align='C', h=5)
     pdf.ln(3)
-    write_line(pdf, 'PROTECCION DE DATOS Y CONFIDENCIALIDAD: La informacion contenida en este documento es de caracter confidencial y esta protegida bajo la Ley 1581 de 2012 (Proteccion de Datos Personales), la Ley 1438 de 2011 (Reforma al Sistema de Salud) y la Resolucion 3374 de 2000 (RIPS). Su uso indebido o divulgacion no autorizada podra generar responsabilidad civil y penal. Este documento fue generado por aQario - Software de GRUPO AXIS S.A.S. NIT 902021366.', size=7, align='C', h=7)
+    write_footer_legal(pdf)
+
+    # Log document generation
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute("""CREATE TABLE IF NOT EXISTS log_documentos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tipo_doc TEXT,
+            numero_factura TEXT,
+            eps TEXT,
+            usuario TEXT,
+            fecha_generacion TEXT,
+            ip_session TEXT
+        )""")
+        for _, row in df_eps.iterrows():
+            c.execute("""INSERT INTO log_documentos 
+                (tipo_doc, numero_factura, eps, usuario, fecha_generacion)
+                VALUES (?, ?, ?, ?, ?)""",
+                ("Titulo Ejecutivo", str(row.get('NUMERO_FACTURA', '')), 
+                 str(row.get('NIT_EPS', '')), usuario_actual, 
+                 datetime.now().isoformat()))
+        conn.commit()
+        conn.close()
+    except:
+        pass
 
     return bytes(pdf.output())
 
@@ -395,46 +538,96 @@ def generar_certificado_pdf(nombre_ips, fecha_inicio, fecha_fin, total_rips, val
         .replace('…','...').replace('\u00e9','e')\
         .encode('latin-1','ignore').decode('latin-1')
 
-    def write_line(pdf, txt, bold=False, size=10, align='L', h=7):
+    def wl(pdf, txt, bold=False, size=10, align='L', h=7):
         pdf.set_font('Helvetica', 'B' if bold else '', size)
         txt = clean(str(txt))
-        pdf.cell(0, h, txt[:90], ln=1, align=align)
-        if len(txt) > 90:
-            pdf.cell(0, h, txt[90:180], ln=1, align=align)
+        max_chars = 85
+        while txt:
+            chunk = txt[:max_chars]
+            if len(txt) > max_chars and ' ' in chunk:
+                chunk = chunk[:chunk.rfind(' ')]
+            pdf.cell(0, h, chunk, ln=1, align=align)
+            txt = txt[len(chunk):].strip()
 
-    pdf = FPDF('P', 'mm', 'A4')
+    def write_footer_legal(pdf):
+        pdf.set_font('Helvetica', '', 7)
+        lineas = [
+            'PROTECCION DE DATOS Y CONFIDENCIALIDAD:',
+            'La informacion contenida es confidencial, protegida bajo Ley 1581/2012',
+            '(Proteccion de Datos Personales), Ley 1438/2011 y Resolucion 3374/2000 (RIPS).',
+            'Su divulgacion no autorizada genera responsabilidad civil y penal.',
+            'Documento generado por aQario - GRUPO AXIS S.A.S. NIT 902021366-2 | Medellin, Colombia',
+        ]
+        for linea in lineas:
+            pdf.cell(0, 4, clean(linea), ln=1, align='C')
+
+    def add_watermark(pdf, usuario, timestamp):
+        pdf.set_text_color(200, 200, 200)
+        pdf.set_font('Helvetica', '', 8)
+        pdf.set_xy(120, 5)
+        pdf.cell(70, 5, clean(f'Impreso por: {usuario}'), align='R', ln=1)
+        pdf.set_xy(120, 9)
+        pdf.cell(70, 5, clean(f'Fecha: {timestamp}'), align='R', ln=1)
+        pdf.set_text_color(0, 0, 0)
+
+    pdf = FPDF('P','mm','A4')
     pdf.add_page()
-    pdf.set_left_margin(20)
-    pdf.set_right_margin(20)
-    pdf.set_top_margin(20)
+    timestamp = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+    usuario_actual = st.session_state.get('user', 'Sistema')
+    add_watermark(pdf, usuario_actual, timestamp)
+    
+    pdf.set_margins(20,20,20)
     pdf.set_auto_page_break(True, margin=20)
-    pdf.set_xy(20, 15)
+    pdf.set_xy(20,15)
 
     try:
         pdf.image('logo_aqario.png', x=20, y=12, w=32)
-        pdf.set_xy(20, 45)
+        pdf.set_xy(20, 44)
     except:
-        write_line(pdf, 'aQario - GRUPO AXIS S.A.S.', bold=True, size=11)
-
-    write_line(pdf, 'CERTIFICADO DE AUDITORIA DE CARTERA', bold=True, size=14, align='C', h=10)
+        wl(pdf, 'aQario - GRUPO AXIS S.A.S.', bold=True, size=11)
+    
+    wl(pdf, 'CERTIFICADO DE AUDITORIA DE CARTERA', bold=True, size=14, align='C', h=10)
     pdf.ln(5)
 
-    write_line(pdf, f'GRUPO AXIS S.A.S. certifica que entre {fecha_inicio} y {fecha_fin}', size=10, h=7)
-    write_line(pdf, f'se auditaron {total_rips} RIPS de {nombre_ips}, con un valor total de ${valor_total:,.0f}.', size=10, h=7)
-    write_line(pdf, f'Se detectaron {errores} errores de digitacion. Recuperabilidad estimada: {recuperabilidad}%.', size=10, h=7)
+    wl(pdf, f'GRUPO AXIS S.A.S. certifica que entre {fecha_inicio} y {fecha_fin}', size=10, h=7)
+    wl(pdf, f'se auditaron {total_rips} RIPS de {nombre_ips}, con un valor total de ${valor_total:,.0f}.', size=10, h=7)
+    wl(pdf, f'Se detectaron {errores} errores de digitacion. Recuperabilidad estimada: {recuperabilidad}%.', size=10, h=7)
     pdf.ln(5)
 
-    write_line(pdf, 'Firmado por: Departamento de Auditoria AXIS BPO', bold=True, size=10, h=7)
+    wl(pdf, 'Firmado por: Departamento de Auditoria AXIS BPO', bold=True, size=10, h=7)
     pdf.ln(3)
 
     pdf.set_draw_color(10,26,63)
     pdf.line(20, pdf.get_y(), 190, pdf.get_y())
     pdf.ln(3)
-    write_line(pdf, 'Departamento de Recaudo y Gestion de Cartera - GRUPO AXIS S.A.S.', size=8, align='C', h=5)
-    write_line(pdf, 'aQario - Software creado por Grupo AXIS S.A.S. NIT 902021366', size=8, align='C', h=5)
-    write_line(pdf, 'Medellin, Colombia | El Eje de su Crecimiento', size=8, align='C', h=5)
+    wl(pdf, 'Departamento de Recaudo y Gestion de Cartera - GRUPO AXIS S.A.S.', size=8, align='C', h=5)
+    wl(pdf, 'aQario - Software creado por Grupo AXIS S.A.S. NIT 902021366-2', size=8, align='C', h=5)
+    wl(pdf, 'Medellin, Colombia | El Eje de su Crecimiento', size=8, align='C', h=5)
     pdf.ln(3)
-    write_line(pdf, 'PROTECCION DE DATOS Y CONFIDENCIALIDAD: La informacion contenida en este documento es de caracter confidencial y esta protegida bajo la Ley 1581 de 2012 (Proteccion de Datos Personales), la Ley 1438 de 2011 (Reforma al Sistema de Salud) y la Resolucion 3374 de 2000 (RIPS). Su uso indebido o divulgacion no autorizada podra generar responsabilidad civil y penal. Este documento fue generado por aQario - Software de GRUPO AXIS S.A.S. NIT 902021366.', size=7, align='C', h=7)
+    write_footer_legal(pdf)
+
+    # Log document generation
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute("""CREATE TABLE IF NOT EXISTS log_documentos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tipo_doc TEXT,
+            numero_factura TEXT,
+            eps TEXT,
+            usuario TEXT,
+            fecha_generacion TEXT,
+            ip_session TEXT
+        )""")
+        c.execute("""INSERT INTO log_documentos 
+            (tipo_doc, numero_factura, eps, usuario, fecha_generacion)
+            VALUES (?, ?, ?, ?, ?)""",
+            ("Certificado", "", nombre_ips, usuario_actual, 
+             datetime.now().isoformat()))
+        conn.commit()
+        conn.close()
+    except:
+        pass
 
     return bytes(pdf.output())
 
@@ -694,6 +887,17 @@ text-transform:uppercase;margin-bottom:4px;">Usuario activo</div>
 </div>
 """, unsafe_allow_html=True)
         
+        # Persistence status indicator
+        if st.session_state.get('auditoria_loaded'):
+            df = st.session_state.df_auditoria
+            st.markdown(f"""
+            <div style="background:rgba(0,184,120,0.15);border:1px solid rgba(0,184,120,0.4);
+            border-radius:6px;padding:8px 12px;margin:8px 0;font-size:0.75rem;">
+            <span style="color:#00B878;font-weight:700;">DATOS ACTIVOS</span><br>
+            <span style="color:#A8D5C2;">{len(df)} facturas cargadas</span>
+            </div>
+            """, unsafe_allow_html=True)
+        
         st.markdown("---")
         
         st.markdown("**💾 RESPALDO**")
@@ -729,6 +933,17 @@ def render_auditoria():
         df["VALOR_TOTAL"] = pd.to_numeric(df["VALOR_TOTAL"], errors="coerce").fillna(0)
         df = validar_con_manuales(df)
         st.session_state.df_auditoria = df
+        
+        # Save to auditoria_temp table for persistence
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            df.to_sql('auditoria_temp', conn, if_exists='replace', index=False)
+            conn.commit()
+            conn.close()
+            st.session_state.auditoria_loaded = True
+        except Exception as e:
+            pass
+        
         st.success(f"Archivo cargado: {len(df)} facturas")
 
     df = st.session_state.df_auditoria
@@ -762,13 +977,9 @@ def render_titulos():
     if modo == "Individual":
         factura = st.selectbox("Seleccionar Factura:", df["NUMERO_FACTURA"].tolist() if "NUMERO_FACTURA" in df.columns else [])
         if factura and st.button("Generar PDF", type="primary"):
-            mandatario = get_mandatario()
-            if not mandatario:
-                st.warning("Complete los datos del mandatario en CONFIG antes de generar titulos")
-                return
             fila = df[df["NUMERO_FACTURA"] == factura].iloc[0]
             perfil = get_perfil_ips()
-            pdf_bytes = generar_titulo_pdf(fila.to_dict(), perfil, mandatario)
+            pdf_bytes = generar_titulo_pdf(fila.to_dict(), perfil)
             if pdf_bytes:
                 save_auditoria({
                     "ips": st.session_state.ips_seleccionada,
@@ -790,13 +1001,9 @@ def render_titulos():
         eps_list = df["NIT_EPS"].unique().tolist()
         eps_seleccionada = st.selectbox("Seleccionar EPS:", eps_list)
         if st.button("Generar PDF por EPS", type="primary"):
-            mandatario = get_mandatario()
-            if not mandatario:
-                st.warning("Complete los datos del mandatario en CONFIG antes de generar titulos")
-                return
             df_eps = df[df["NIT_EPS"] == eps_seleccionada]
             perfil = get_perfil_ips()
-            pdf_bytes = generar_titulo_por_entidad(df_eps, perfil, mandatario)
+            pdf_bytes = generar_titulo_por_entidad(df_eps, perfil)
             if pdf_bytes:
                 for _, row in df_eps.iterrows():
                     save_auditoria({
@@ -814,10 +1021,6 @@ def render_titulos():
 
     elif modo == "Masivo (Todas las EPS)":
         if st.button("Generar Consolidado Masivo", type="primary"):
-            mandatario = get_mandatario()
-            if not mandatario:
-                st.warning("Complete los datos del mandatario en CONFIG antes de generar titulos")
-                return
             if "NIT_EPS" not in df.columns:
                 st.warning("No hay datos de EPS en el archivo cargado")
                 return
@@ -825,7 +1028,7 @@ def render_titulos():
             zip_buffer = io.BytesIO()
             with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
                 for eps_name, group_df in df.groupby('NIT_EPS'):
-                    pdf_bytes = generar_titulo_por_entidad(group_df, perfil, mandatario)
+                    pdf_bytes = generar_titulo_por_entidad(group_df, perfil)
                     if pdf_bytes:
                         safe_name = eps_name.replace('/', '-').replace(' ', '_')[:40]
                         zf.writestr(f"Titulo_{safe_name}.pdf", pdf_bytes)
@@ -1046,29 +1249,6 @@ def render_config():
             })
             st.session_state.perfil_ips = get_perfil_ips()
             st.success("Perfil guardado en SQLite")
-
-    st.markdown("---")
-    st.markdown("### Datos del Mandatario")
-    mandatario = get_mandatario()
-    with st.form("mandatario_form"):
-        col1, col2 = st.columns(2)
-        with col1:
-            nombre_mandatario = st.text_input("Nombre Mandatario", value=mandatario.get("nombre_mandatario", "") if mandatario else "")
-            cargo_mandatario = st.text_input("Cargo Mandatario", value=mandatario.get("cargo_mandatario", "") if mandatario else "")
-        with col2:
-            nit_mandante = st.text_input("NIT Mandante", value=mandatario.get("nit_mandante", "") if mandatario else "")
-            numero_contrato = st.text_input("Numero Contrato Mandato", value=mandatario.get("numero_contrato_mandato", "") if mandatario else "")
-        fecha_contrato = st.date_input("Fecha Contrato", value=datetime.strptime(mandatario.get("fecha_contrato", "2000-01-01"), "%Y-%m-%d") if mandatario else datetime.now())
-        
-        if st.form_submit_button("Guardar Mandatario", use_container_width=True, type="primary"):
-            save_mandatario({
-                "nombre_mandatario": nombre_mandatario,
-                "cargo_mandatario": cargo_mandatario,
-                "nit_mandante": nit_mandante,
-                "numero_contrato_mandato": numero_contrato,
-                "fecha_contrato": fecha_contrato.strftime("%d/%m/%Y")
-            })
-            st.success("Datos del mandatario guardados en SQLite")
 
     st.markdown("---")
     st.markdown("### Base de Conocimiento (Manuales)")
