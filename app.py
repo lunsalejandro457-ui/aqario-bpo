@@ -22,6 +22,9 @@ st.set_page_config(page_title="aQario", page_icon="📊", layout="wide", initial
 DIR_ACTUAL = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(DIR_ACTUAL, "aqario.db")
 
+def get_db_connection():
+    return sqlite3.connect(DB_PATH)
+
 def init_db():
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
@@ -55,25 +58,95 @@ def init_db():
         accion TEXT
     )''')
     c.execute('''CREATE TABLE IF NOT EXISTS auditoria_temp (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
         NUMERO_FACTURA TEXT, VALOR_TOTAL REAL, NIT_EPS TEXT,
         FECHA_RADICADO TEXT, CODIGO_CUPS TEXT, DIAGNOSTICO TEXT,
         NOMBRE_PACIENTE TEXT, SEXO TEXT, EDAD TEXT,
         DOCUMENTO TEXT, MEDICO_TRATANTE TEXT, FECHA_ATENCION TEXT,
-        ALERTAS_SISTEMA TEXT, ips_asignada TEXT
+        ALERTAS_SISTEMA TEXT, ips_asignada TEXT,
+        fecha_carga TEXT DEFAULT (datetime('now')),
+        cargado_por TEXT
     )''')
-    c.execute('''CREATE TABLE IF NOT EXISTS mandatario (
-        id INTEGER PRIMARY KEY,
-        nombre_mandatario TEXT,
-        cargo_mandatario TEXT,
-        nit_mandante TEXT,
-        numero_contrato_mandato TEXT,
-        fecha_contrato TEXT
+    c.execute('''CREATE TABLE IF NOT EXISTS seguimiento_cobros (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        numero_factura TEXT NOT NULL,
+        nit_eps TEXT,
+        nombre_paciente TEXT,
+        valor_total REAL,
+        ips_asignada TEXT,
+        estado TEXT DEFAULT 'Pendiente',
+        responsable TEXT,
+        fecha_radicacion TEXT,
+        numero_radicado TEXT,
+        fecha_respuesta_eps TEXT,
+        valor_pagado REAL DEFAULT 0,
+        diferencia REAL DEFAULT 0,
+        prioridad TEXT DEFAULT 'Normal',
+        dias_cartera INTEGER DEFAULT 0,
+        fecha_prescripcion TEXT,
+        alerta_prescripcion INTEGER DEFAULT 0,
+        notas TEXT,
+        fecha_creacion TEXT DEFAULT (datetime('now')),
+        fecha_actualizacion TEXT DEFAULT (datetime('now')),
+        actualizado_por TEXT
     )''')
-    c.execute('''CREATE TABLE IF NOT EXISTS manuales (
-        nombre TEXT PRIMARY KEY,
-        contenido BLOB,
-        fecha_carga TEXT,
-        usuario TEXT
+    c.execute('''CREATE TABLE IF NOT EXISTS comunicaciones (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        numero_factura TEXT NOT NULL,
+        nit_eps TEXT,
+        tipo TEXT,
+        fecha_comunicacion TEXT DEFAULT (datetime('now')),
+        descripcion TEXT,
+        resultado TEXT,
+        proximo_seguimiento TEXT,
+        usuario TEXT,
+        adjunto_nombre TEXT
+    )''')
+    c.execute('''CREATE TABLE IF NOT EXISTS glosas (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        numero_factura TEXT NOT NULL,
+        nit_eps TEXT,
+        codigo_glosa TEXT,
+        descripcion_glosa TEXT,
+        valor_glosado REAL,
+        fecha_glosa TEXT,
+        estado_glosa TEXT DEFAULT 'Recibida',
+        respuesta_axis TEXT,
+        fecha_respuesta TEXT,
+        usuario_respuesta TEXT,
+        valor_recuperado REAL DEFAULT 0
+    )''')
+    c.execute('''CREATE TABLE IF NOT EXISTS pagos_recibidos (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        numero_factura TEXT,
+        nit_eps TEXT,
+        valor_factura REAL,
+        valor_pagado REAL,
+        diferencia REAL,
+        fecha_pago TEXT,
+        numero_comprobante TEXT,
+        observaciones TEXT,
+        usuario_registro TEXT,
+        fecha_registro TEXT DEFAULT (datetime('now'))
+    )''')
+    c.execute('''CREATE TABLE IF NOT EXISTS alertas_sistema (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        tipo TEXT,
+        numero_factura TEXT,
+        mensaje TEXT,
+        nivel TEXT DEFAULT 'Info',
+        activa INTEGER DEFAULT 1,
+        fecha_creacion TEXT DEFAULT (datetime('now')),
+        fecha_vista TEXT,
+        visto_por TEXT
+    )''')
+    c.execute('''CREATE TABLE IF NOT EXISTS log_documentos (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        tipo_doc TEXT,
+        numero_factura TEXT,
+        eps TEXT,
+        usuario TEXT,
+        fecha_generacion TEXT DEFAULT (datetime('now'))
     )''')
     c.execute("SELECT COUNT(*) FROM usuarios")
     if c.fetchone()[0] == 0:
@@ -89,27 +162,119 @@ def init_db():
 
 init_db()
 
-def init_session():
-    """Load persisted data from SQLite on startup"""
-    if 'df_auditoria' not in st.session_state:
-        st.session_state.df_auditoria = None
-    if 'auditoria_loaded' not in st.session_state:
-        st.session_state.auditoria_loaded = False
-    if 'ips_seleccionada' not in st.session_state:
-        st.session_state.ips_seleccionada = 'Todas las IPS'
-    
-    # Try to load from auditoria_temp table
+def get_db_connection():
+    return sqlite3.connect(DB_PATH)
+
+def calcular_dias_cartera(fecha_str):
     try:
-        conn = sqlite3.connect(DB_PATH)
-        df_saved = pd.read_sql_query("SELECT * FROM auditoria_temp", conn)
-        conn.close()
-        if len(df_saved) >0:
-            st.session_state.df_auditoria = df_saved
-            st.session_state.auditoria_loaded = True
+        for fmt in ["%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y"]:
+            try:
+                fecha = datetime.strptime(str(fecha_str).strip(), fmt)
+                return (datetime.now() - fecha).days
+            except:
+                continue
+    except:
+        pass
+    return 0
+
+def calcular_fecha_prescripcion(fecha_str):
+    try:
+        dias = calcular_dias_cartera(fecha_str)
+        fecha_orig = datetime.now() - timedelta(days=dias)
+        fecha_presc = fecha_orig + timedelta(days=1095)  # 3 años
+        return fecha_presc.strftime("%Y-%m-%d")
+    except:
+        return ""
+
+def generar_alertas_automaticas(conn):
+    # Borrar alertas anteriores activas
+    conn.execute("DELETE FROM alertas_sistema WHERE activa=1")
+    
+    try:
+        facturas = conn.execute(
+            "SELECT * FROM seguimiento_cobros WHERE estado != 'Pagada'"
+        ).fetchall()
+        
+        for f in facturas:
+            dias = f['dias_cartera'] if f['dias_cartera'] else 0
+            num = f['numero_factura']
+            
+            # Prescripción inminente
+            if dias > 270:
+                conn.execute("""
+                    INSERT INTO alertas_sistema 
+                    (tipo, numero_factura, mensaje, nivel)
+                    VALUES (?, ?, ?, ?)
+                """, (
+                    'PrescripcionRiesgo', num,
+                    f'PRESCRIPCION: Factura {num} lleva {dias} dias - riesgo en {1095-dias} dias',
+                    'Critico' if dias > 900 else 'Advertencia'
+                ))
+            
+            # Sin seguimiento en más de 30 días
+            ult_com = conn.execute(
+                """SELECT MAX(fecha_comunicacion) as ult 
+                   FROM comunicaciones WHERE numero_factura=?""",
+                (num,)
+            ).fetchone()
+            
+            if not ult_com or not ult_com['ult']:
+                conn.execute("""
+                    INSERT INTO alertas_sistema
+                    (tipo, numero_factura, mensaje, nivel)
+                    VALUES (?, ?, ?, ?)
+                """, (
+                    'SinSeguimiento', num,
+                    f'Factura {num} sin comunicacion registrada',
+                    'Advertencia'
+                ))
+        
+        conn.commit()
     except Exception as e:
         pass
 
-init_session()
+def init_db_and_restore():
+    conn = get_db_connection()
+    init_db()
+    
+    # Restaurar df_auditoria
+    if 'df_auditoria' not in st.session_state:
+        try:
+            df = pd.read_sql_query(
+                "SELECT * FROM auditoria_temp ORDER BY fecha_carga DESC",
+                conn
+            )
+            st.session_state.df_auditoria = df if len(df) > 0 else None
+        except:
+            st.session_state.df_auditoria = None
+    
+    # Restaurar seguimiento
+    if 'df_seguimiento' not in st.session_state:
+        try:
+            df_seg = pd.read_sql_query(
+                "SELECT * FROM seguimiento_cobros ORDER BY fecha_actualizacion DESC",
+                conn
+            )
+            st.session_state.df_seguimiento = df_seg
+        except:
+            st.session_state.df_seguimiento = pd.DataFrame()
+    
+    # Restaurar perfil IPS
+    if 'perfil_ips' not in st.session_state:
+        try:
+            row = conn.execute(
+                "SELECT * FROM perfil_ips LIMIT 1"
+            ).fetchone()
+            st.session_state.perfil_ips = dict(row) if row else None
+        except:
+            st.session_state.perfil_ips = None
+    
+    # Generar alertas automáticas
+    generar_alertas_automaticas(conn)
+    
+    conn.close()
+
+init_db_and_restore()
 
 def get_usuarios():
     conn = sqlite3.connect(DB_PATH)
@@ -146,6 +311,53 @@ def save_mandatario(data):
     c.execute("INSERT INTO mandatario (nombre_mandatario, cargo_mandatario, nit_mandante, numero_contrato_mandato, fecha_contrato) VALUES (?, ?, ?, ?, ?)",
         (data.get("nombre_mandatario", ""), data.get("cargo_mandatario", ""), data.get("nit_mandante", ""),
          data.get("numero_contrato_mandato", ""), data.get("fecha_contrato", "")))
+    conn.commit()
+    conn.close()
+
+def guardar_auditoria_en_db(df, usuario, ips_asignada):
+    conn = get_db_connection()
+    df['cargado_por'] = usuario
+    df['ips_asignada'] = ips_asignada
+    df['fecha_carga'] = datetime.now().isoformat()
+    
+    # Reemplazar datos anteriores de esta IPS
+    conn.execute(
+        "DELETE FROM auditoria_temp WHERE ips_asignada = ?",
+        (ips_asignada,)
+    )
+    df.to_sql('auditoria_temp', conn, if_exists='append', index=False)
+    
+    # Crear registros de seguimiento para facturas nuevas
+    for _, row in df.iterrows():
+        existing = conn.execute(
+            "SELECT id FROM seguimiento_cobros WHERE numero_factura = ?",
+            (str(row.get('NUMERO_FACTURA', '')),)
+        ).fetchone()
+        
+        if not existing:
+            fecha_rad = str(row.get('FECHA_RADICADO', ''))
+            dias = calcular_dias_cartera(fecha_rad)
+            fecha_presc = calcular_fecha_prescripcion(fecha_rad)
+            
+            conn.execute("""
+                INSERT INTO seguimiento_cobros 
+                (numero_factura, nit_eps, nombre_paciente, valor_total,
+                 ips_asignada, estado, dias_cartera, fecha_prescripcion,
+                 alerta_prescripcion, fecha_creacion)
+                VALUES (?,?,?,?,?,?,?,?,?)
+            """, (
+                str(row.get('NUMERO_FACTURA', '')),
+                str(row.get('NIT_EPS', '')),
+                str(row.get('NOMBRE_PACIENTE', '')),
+                float(row.get('VALOR_TOTAL', 0)),
+                ips_asignada,
+                'Pendiente',
+                dias,
+                fecha_presc,
+                1 if dias > 270 else 0,
+                datetime.now().isoformat()
+            ))
+    
     conn.commit()
     conn.close()
 
@@ -934,15 +1146,8 @@ def render_auditoria():
         df = validar_con_manuales(df)
         st.session_state.df_auditoria = df
         
-        # Save to auditoria_temp table for persistence
-        try:
-            conn = sqlite3.connect(DB_PATH)
-            df.to_sql('auditoria_temp', conn, if_exists='replace', index=False)
-            conn.commit()
-            conn.close()
-            st.session_state.auditoria_loaded = True
-        except Exception as e:
-            pass
+        # Guardar en SQLite INMEDIATAMENTE
+        guardar_auditoria_en_db(df, st.session_state.user, st.session_state.ips_seleccionada)
         
         st.success(f"Archivo cargado: {len(df)} facturas")
 
@@ -1315,40 +1520,290 @@ def render_cliente_ips_portal():
         pdf_bytes = generar_certificado_pdf(ips_asignada, fecha_inicio, fecha_fin, total_rips, valor_total, errores_count, recuperabilidad, perfil)
         st.download_button("Descargar Certificado", data=pdf_bytes, file_name=f"Certificado_{ips_asignada}.pdf", mime="application/pdf", type="primary", use_container_width=True)
 
+def render_gestion():
+    st.markdown("## Gestion de Cobros")
+    conn = get_db_connection()
+    
+    # --- ALERTAS CRITICAS al tope ---
+    alertas_criticas = pd.read_sql_query(
+        "SELECT * FROM alertas_sistema WHERE activa=1 AND nivel='Critico'",
+        conn
+    )
+    if len(alertas_criticas) > 0:
+        for _, a in alertas_criticas.iterrows():
+            st.error(f"ALERTA: {a['mensaje']}")
+    
+    # --- PANEL DE METRICAS ---
+    df_seg = pd.read_sql_query(
+        "SELECT * FROM seguimiento_cobros", conn
+    )
+    
+    total = df_seg['valor_total'].sum() if len(df_seg) > 0 else 0
+    pagado = df_seg['valor_pagado'].sum() if len(df_seg) > 0 else 0
+    pendientes = len(df_seg[df_seg['estado'] == 'Pendiente']) if len(df_seg) > 0 else 0
+    en_riesgo = len(df_seg[df_seg['alerta_prescripcion'] == 1]) if len(df_seg) > 0 else 0
+    
+    c1,c2,c3,c4,c5 = st.columns(5)
+    c1.metric("Total Cartera", f"$ {total:,.0f}".replace(',','.'))
+    c2.metric("Recuperado", f"$ {pagado:,.0f}".replace(',','.'))
+    c3.metric("% Recuperado", f"{(pagado/total*100):.1f}%" if total > 0 else "0%")
+    c4.metric("Pendientes", pendientes)
+    c5.metric("En riesgo prescripcion", en_riesgo, delta_color="inverse")
+    
+    st.markdown("---")
+    
+    # --- FILTROS ---
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        filtro_estado = st.selectbox("Estado", 
+            ["Todos","Pendiente","Radicada","En Glosa",
+             "Respondida","Pagada","Prescrita"])
+    with col2:
+        filtro_eps = st.selectbox("EPS",
+            ["Todas"] + list(df_seg['nit_eps'].unique()) if len(df_seg) > 0 else ["Todas"])
+    with col3:
+        filtro_prioridad = st.selectbox("Prioridad",
+            ["Todas","Urgente","Alta","Normal","Baja"])
+    
+    # Aplicar filtros
+    df_view = df_seg.copy()
+    if filtro_estado != "Todos":
+        df_view = df_view[df_view['estado'] == filtro_estado]
+    if filtro_eps != "Todas":
+        df_view = df_view[df_view['nit_eps'] == filtro_eps]
+    if filtro_prioridad != "Todas":
+        df_view = df_view[df_view['prioridad'] == filtro_prioridad]
+    
+    # --- TABLA DE SEGUIMIENTO ---
+    st.subheader(f"Facturas en gestion ({len(df_view)})")
+    
+    if len(df_view) > 0:
+        # Colorear por estado y alertas
+        def highlight_row(row):
+            if row['alerta_prescripcion'] == 1:
+                return ['background-color: #FEF0EE'] * len(row)
+            elif row['estado'] == 'Pagada':
+                return ['background-color: #E8F8F2'] * len(row)
+            elif row['estado'] == 'En Glosa':
+                return ['background-color: #FFF8E7'] * len(row)
+            return [''] * len(row)
+        
+        cols_show = ['numero_factura','nit_eps','nombre_paciente',
+                     'valor_total','estado','responsable',
+                     'dias_cartera','prioridad','numero_radicado']
+        df_display = df_view[
+            [c for c in cols_show if c in df_view.columns]
+        ].copy()
+        
+        st.dataframe(
+            df_display.style.apply(highlight_row, axis=1),
+            use_container_width=True,
+            height=350
+        )
+    
+    st.markdown("---")
+    
+    # --- ACTUALIZAR ESTADO DE FACTURA ---
+    st.subheader("Actualizar Factura")
+    
+    facturas_list = df_seg['numero_factura'].tolist() if len(df_seg) > 0 else []
+    
+    if facturas_list:
+        with st.form("form_actualizar_factura"):
+            col1, col2 = st.columns(2)
+            with col1:
+                factura_sel = st.selectbox("Seleccionar Factura", facturas_list)
+                nuevo_estado = st.selectbox("Nuevo Estado", [
+                    "Pendiente","Radicada","En Glosa",
+                    "Respondida","Pagada","Prescrita"
+                ])
+                responsable = st.text_input("Responsable AXIS")
+                numero_radicado = st.text_input("Numero de Radicado")
+            with col2:
+                prioridad = st.selectbox("Prioridad",
+                    ["Normal","Urgente","Alta","Baja"])
+                valor_pagado = st.number_input("Valor Pagado ($)", 
+                    min_value=0.0, step=1000.0)
+                notas = st.text_area("Notas / Observaciones", height=100)
+            
+            submitted = st.form_submit_button(
+                "Guardar Cambios", use_container_width=True
+            )
+            
+            if submitted:
+                # GUARDAR EN SQLITE PRIMERO
+                conn.execute("""
+                    UPDATE seguimiento_cobros 
+                    SET estado=?, responsable=?, numero_radicado=?,
+                        prioridad=?, valor_pagado=?, notas=?,
+                        fecha_actualizacion=?, actualizado_por=?
+                    WHERE numero_factura=?
+                """, (
+                    nuevo_estado, responsable, numero_radicado,
+                    prioridad, valor_pagado, notas,
+                    datetime.now().isoformat(),
+                    st.session_state.get('user','sistema'),
+                    factura_sel
+                ))
+                
+                if nuevo_estado == 'Pagada' and valor_pagado > 0:
+                    val_original = float(df_seg[
+                        df_seg['numero_factura'] == factura_sel
+                    ]['valor_total'].values[0])
+                    conn.execute("""
+                        INSERT INTO pagos_recibidos
+                        (numero_factura, valor_factura, valor_pagado,
+                         diferencia, fecha_pago, usuario_registro)
+                        VALUES (?,?,?,?,?,?)
+                    """, (
+                        factura_sel, val_original, valor_pagado,
+                        val_original - valor_pagado,
+                        datetime.now().strftime("%Y-%m-%d"),
+                        st.session_state.get('user','sistema')
+                    ))
+                
+                conn.commit()
+                # Refrescar session_state
+                st.session_state.df_seguimiento = pd.read_sql_query(
+                    "SELECT * FROM seguimiento_cobros", conn
+                )
+                st.success(f"Factura {factura_sel} actualizada correctamente")
+                st.rerun()
+    
+    st.markdown("---")
+    
+    # --- REGISTRAR COMUNICACION ---
+    st.subheader("Registrar Comunicacion con EPS")
+    
+    with st.form("form_comunicacion"):
+        col1, col2 = st.columns(2)
+        with col1:
+            fact_com = st.selectbox("Factura", facturas_list, key="fact_com")
+            tipo_com = st.selectbox("Tipo", [
+                "Llamada","Email","Carta",
+                "Radicado Fisico","WhatsApp","Reunion"
+            ])
+            resultado = st.selectbox("Resultado", [
+                "Sin respuesta","Comprometio pago",
+                "Glosa","Pagado","Escalado","Pendiente respuesta"
+            ])
+        with col2:
+            descripcion = st.text_area("Descripcion", height=80)
+            proximo = st.date_input("Proximo seguimiento")
+        
+        sub_com = st.form_submit_button(
+            "Registrar Comunicacion", use_container_width=True
+        )
+        
+        if sub_com:
+            conn.execute("""
+                INSERT INTO comunicaciones
+                (numero_factura, tipo, descripcion, resultado,
+                 proximo_seguimiento, usuario, fecha_comunicacion)
+                VALUES (?,?,?,?,?,?)
+            """, (
+                fact_com, tipo_com, descripcion, resultado,
+                str(proximo),
+                st.session_state.get('user','sistema'),
+                datetime.now().isoformat()
+            ))
+            conn.commit()
+            st.success("Comunicacion registrada y guardada")
+    
+    # --- HISTORIAL DE COMUNICACIONES ---
+    st.subheader("Historial de Comunicaciones")
+    hist = pd.read_sql_query(
+        """SELECT numero_factura, tipo, fecha_comunicacion,
+                  descripcion, resultado, proximo_seguimiento, usuario
+           FROM comunicaciones 
+           ORDER BY fecha_comunicacion DESC LIMIT 50""",
+        conn
+    )
+    if len(hist) > 0:
+        st.dataframe(hist, use_container_width=True)
+    else:
+        st.info("Sin comunicaciones registradas aun.")
+    
+    conn.close()
+
 if not st.session_state.logged_in:
     render_login()
 else:
     render_sidebar()
+    
+    # Sidebar alertas críticas
+    conn_temp = get_db_connection()
+    try:
+        n_criticas = conn_temp.execute(
+            "SELECT COUNT(*) FROM alertas_sistema WHERE activa=1 AND nivel='Critico'"
+        ).fetchone()[0]
+        n_advertencias = conn_temp.execute(
+            "SELECT COUNT(*) FROM alertas_sistema WHERE activa=1 AND nivel='Advertencia'"
+        ).fetchone()[0]
+        
+        if n_criticas > 0:
+            st.sidebar.markdown(f"""
+            <div style="background:rgba(231,76,60,0.2);border:1px solid #E74C3C;
+            border-radius:6px;padding:8px 12px;margin:6px 0;">
+            <span style="color:#E74C3C;font-weight:700;font-size:0.8rem;">
+            {n_criticas} ALERTA(S) CRITICA(S)</span>
+            </div>""", unsafe_allow_html=True)
+        
+        if n_advertencias > 0:
+            st.sidebar.markdown(f"""
+            <div style="background:rgba(243,156,18,0.2);border:1px solid #F39C12;
+            border-radius:6px;padding:8px 12px;margin:6px 0;">
+            <span style="color:#F39C12;font-weight:700;font-size:0.8rem;">
+            {n_advertencias} advertencia(s)</span>
+            </div>""", unsafe_allow_html=True)
+        
+        # Mostrar estado de datos cargados
+        n_facturas = conn_temp.execute(
+            "SELECT COUNT(*) FROM auditoria_temp"
+        ).fetchone()[0]
+        if n_facturas > 0:
+            st.sidebar.markdown(f"""
+            <div style="background:rgba(0,184,120,0.15);border:1px solid rgba(0,184,120,0.4);
+            border-radius:6px;padding:8px 12px;margin:6px 0;font-size:0.75rem;">
+            <span style="color:#00B878;font-weight:700;">DATOS ACTIVOS</span><br>
+            <span style="color:#A8D5C2;">{n_facturas} facturas en sistema</span>
+            </div>""", unsafe_allow_html=True)
+    except:
+        pass
+    conn_temp.close()
+    
     st.markdown("""
-<div style="display:flex;align-items:center;gap:16px;
-padding:0 0 16px 0;border-bottom:3px solid #00A8E8;margin-bottom:24px;">
-<div>
-<div style="font-family:'Montserrat',sans-serif;font-weight:700;
-font-size:1.6rem;color:#001830;letter-spacing:-0.5px;">aQario</div>
-<div style="font-size:0.75rem;color:#5B7FA6;letter-spacing:2px;
-text-transform:uppercase;font-weight:600;">Sistema de Auditoria de Cartera</div>
-</div>
-<div style="margin-left:auto;background:#EEF5FF;border:1px solid #C5D8EC;
-border-radius:6px;padding:4px 12px;">
-<span style="font-size:0.7rem;color:#5B7FA6;letter-spacing:1px;">
-GRUPO AXIS S.A.S. | NIT 902021366</span>
-</div>
-</div>
-""", unsafe_allow_html=True)
+    <div style="display:flex;align-items:center;gap:16px;
+    padding:0 0 16px 0;border-bottom:3px solid #00A8E8;margin-bottom:24px;">
+    <div>
+    <div style="font-family:'Montserrat',sans-serif;font-weight:700;
+    font-size:1.6rem;color:#001830;letter-spacing:-0.5px;">aQario</div>
+    <div style="font-size:0.75rem;color:#5B7FA6;letter-spacing:2px;
+    text-transform:uppercase;font-weight:600;">Sistema de Auditoria de Cartera</div>
+    </div>
+    <div style="margin-left:auto;background:#EEF5FF;border:1px solid #C5D8EC;
+    border-radius:6px;padding:4px 12px;">
+    <span style="font-size:0.7rem;color:#5B7FA6;letter-spacing:1px;">
+    GRUPO AXIS S.A.S. | NIT 902021366</span>
+    </div>
+    </div>
+    """, unsafe_allow_html=True)
     
     if st.session_state.rol == "Cliente IPS":
         render_cliente_ips_portal()
     elif st.session_state.rol == "Master":
-        tab1, tab2, tab3, tab4, tab5 = st.tabs(["AUDITORIA", "TITULOS PDF", "INFORMES", "USUARIOS", "CONFIG"])
+        tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["AUDITORIA", "TITULOS PDF", "GESTION", "INFORMES", "USUARIOS", "CONFIG"])
         with tab1: render_auditoria()
         with tab2: render_titulos()
-        with tab3: render_informes()
-        with tab4: render_usuarios()
-        with tab5: render_config()
+        with tab3: render_gestion()
+        with tab4: render_informes()
+        with tab5: render_usuarios()
+        with tab6: render_config()
     elif st.session_state.rol == "Gestor":
-        tab1, tab2, tab3 = st.tabs(["AUDITORIA", "TITULOS PDF", "INFORMES"])
+        tab1, tab2, tab3, tab4 = st.tabs(["AUDITORIA", "TITULOS PDF", "GESTION", "INFORMES"])
         with tab1: render_auditoria()
         with tab2: render_titulos()
-        with tab3: render_informes()
+        with tab3: render_gestion()
+        with tab4: render_informes()
     else:
         render_auditoria()
